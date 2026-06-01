@@ -1,0 +1,64 @@
+
+====================================
+FECHA: 2026-06-01T03:08:02.517Z
+GRUPO: BITACORA - MTTO - SHP1
+AUTOR: 189795108180057:28@lid
+
+MENSAJE:
+Ejemplo:
+
+BITÁCORA TURNO 1
+
+Área: Sorteo, comedor, anden 2
+1.- Cambio de sensor en banda 4.
+2.- Ajuste de tensión en conveyor.
+3.- Limpieza de área de trabajo.
+
+Pendientes:
+
+* Revisar vibración en motor M2.
+
+Técnico: Saul
+====================================
+
+
+====================================
+FECHA: 2026-06-01T03:08:02.763Z
+GRUPO: BITACORA - MTTO - SHP1
+AUTOR: 189795108180057:28@lid
+
+MENSAJE:
+
+====================================
+
+
+====================================
+FECHA: 2026-06-01T03:20:49.351Z
+GRUPO: BITACORA - MTTO - SHP1
+AUTOR: ing eliezer romero
+
+MENSAJE:
+BITÁCORA TURNO 2
+
+Área: Sorteo, comedor, anden 2
+1.- Cambio de sensor en banda 4.
+2.- Ajuste de tensión en conveyor.
+3.- Limpieza de área de trabajo.
+
+Pendientes:
+
+* Revisar vibración en motor M2.
+
+Técnico: Eliezer Romero Romero
+====================================
+
+
+====================================
+FECHA: 2026-06-01T03:20:58.293Z
+GRUPO: BITACORA - MTTO - SHP1
+AUTOR: ing eliezer romero
+
+MENSAJE:
+
+====================================
+

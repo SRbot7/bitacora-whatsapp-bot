@@ -29,6 +29,9 @@ client.on('ready', () => {
 client.on('message_create', async message => {
 
     const chat = await message.getChat();
+const nombreAutor =
+    message._data.notifyName ||
+    message.author;
 
     if (chat.isGroup && chat.name === 'BITACORA - MTTO - SHP1') {
 
@@ -38,7 +41,7 @@ client.on('message_create', async message => {
 ====================================
 FECHA: ${fecha}
 GRUPO: ${chat.name}
-AUTOR: ${message.author}
+AUTOR: ${nombreAutor}
 
 MENSAJE:
 ${message.body}
@@ -46,7 +49,11 @@ ${message.body}
 
 `;
 
-        fs.appendFileSync('bitacora.txt', texto);
+const fechaArchivo = new Date().toISOString().split('T')[0];
+
+const archivoBitacora = `bitacoras/${fechaArchivo}.txt`;
+
+fs.appendFileSync(archivoBitacora, texto);
 
         console.log('Mensaje guardado');
 
