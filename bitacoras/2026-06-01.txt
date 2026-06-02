@@ -1,64 +1,19 @@
 
-====================================
-FECHA: 2026-06-01T03:08:02.517Z
-GRUPO: BITACORA - MTTO - SHP1
-AUTOR: 189795108180057:28@lid
 
 MENSAJE:
-Ejemplo:
+BITÁCORA TURNO 3
 
-BITÁCORA TURNO 1
-
-Área: Sorteo, comedor, anden 2
-1.- Cambio de sensor en banda 4.
-2.- Ajuste de tensión en conveyor.
-3.- Limpieza de área de trabajo.
+Área: Sorteo, anden 2
+1.-  Inspección diaria de conveyor.
+2.-  Revisión de tolvas y colocación de remaches en tolvas levantadas.
+3.-  Revisión de bandas y grapas. 
+4.- revisión de la transmisión del motor m2 para revisar vibración. 
+5.-recorrido en nave para inspección de funcionamiento de patines hidráulicos, conveyor, procedimiento de operadores en conveyor, bakers. Se localiza bakers dañados, se localizan y retiran para su adecuación o desarmado en área de carpa.
 
 Pendientes:
 
-* Revisar vibración en motor M2.
+*  Cambio de ligas en los últimos cuatro rodillos del conveyor, en donde se encuentran las luces de paro de emergencia.
 
-Técnico: Saul
-====================================
-
-
-====================================
-FECHA: 2026-06-01T03:08:02.763Z
-GRUPO: BITACORA - MTTO - SHP1
-AUTOR: 189795108180057:28@lid
-
-MENSAJE:
-
-====================================
-
-
-====================================
-FECHA: 2026-06-01T03:20:49.351Z
-GRUPO: BITACORA - MTTO - SHP1
-AUTOR: ing eliezer romero
-
-MENSAJE:
-BITÁCORA TURNO 2
-
-Área: Sorteo, comedor, anden 2
-1.- Cambio de sensor en banda 4.
-2.- Ajuste de tensión en conveyor.
-3.- Limpieza de área de trabajo.
-
-Pendientes:
-
-* Revisar vibración en motor M2.
-
-Técnico: Eliezer Romero Romero
-====================================
-
-
-====================================
-FECHA: 2026-06-01T03:20:58.293Z
-GRUPO: BITACORA - MTTO - SHP1
-AUTOR: ing eliezer romero
-
-MENSAJE:
-
+Técnico: FCS
 ====================================
 

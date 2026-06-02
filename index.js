@@ -3,6 +3,7 @@ const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const mime = require('mime-types');
 const path = require('path');
+const pool = require('./db');
 
 const client = new Client({
     authStrategy: new LocalAuth(),
@@ -28,62 +29,113 @@ client.on('ready', () => {
 
 client.on('message_create', async message => {
 
-    const chat = await message.getChat();
-const nombreAutor =
-    message._data.notifyName ||
-    message.author;
+    try {
 
-    if (chat.isGroup && chat.name === 'BITACORA - MTTO - SHP1') {
+        const chat = await message.getChat();
 
-        const fecha = new Date().toISOString();
+        const nombreAutor =
+            message._data.notifyName ||
+            message.author;
 
-        const texto = `
+        // SOLO EL GRUPO DE BITÁCORA
+        if (chat.isGroup && chat.name === 'BITACORA - MTTO - SHP1') {
+
+            const fecha = new Date().toISOString();
+
+            // TEXTO ORIGINAL
+            const textoOriginal = message.body;
+
+            // DETECTAR ÁREA
+            let area = 'Sin área';
+
+            const matchArea = textoOriginal.match(/área:\s*(.*)/i);
+
+            if (matchArea) {
+                area = matchArea[1].trim();
+            }
+
+            // FORMATO TXT
+            const texto = `
 ====================================
 FECHA: ${fecha}
 GRUPO: ${chat.name}
 AUTOR: ${nombreAutor}
 
 MENSAJE:
-${message.body}
+${textoOriginal}
 ====================================
 
 `;
 
-const fechaArchivo = new Date().toISOString().split('T')[0];
+            // GUARDAR TXT
+            const fechaArchivo = new Date().toISOString().split('T')[0];
 
-const archivoBitacora = `bitacoras/${fechaArchivo}.txt`;
+            const carpetaBitacoras = 'bitacoras';
 
-fs.appendFileSync(archivoBitacora, texto);
+            if (!fs.existsSync(carpetaBitacoras)) {
+                fs.mkdirSync(carpetaBitacoras, { recursive: true });
+            }
 
-        console.log('Mensaje guardado');
+            const archivoBitacora = `${carpetaBitacoras}/${fechaArchivo}.txt`;
 
-        // DESCARGAR EVIDENCIAS
-        if (message.hasMedia) {
+            fs.appendFileSync(archivoBitacora, texto);
 
-            const media = await message.downloadMedia();
+            // GUARDAR EN POSTGRESQL
+            await pool.query(
+                `INSERT INTO actividades_mtto 
+                (fecha, tecnico, area, actividad, pendientes, evidencia, turno)
+                
+                VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 
-            if (media) {
+                [
+                    new Date(),
+                    nombreAutor,
+                    area,
+                    textoOriginal,
+                    '',
+                    '',
+                    'Turno 1'
+                ]
+            );
 
-                const fechaCarpeta = new Date().toISOString().split('T')[0];
+            console.log('✅ Guardado en PostgreSQL');
 
-                const carpeta = `evidencias/${fechaCarpeta}`;
+            console.log('Mensaje guardado');
 
-                if (!fs.existsSync(carpeta)) {
-                    fs.mkdirSync(carpeta, { recursive: true });
+            // DESCARGAR EVIDENCIAS
+            if (message.hasMedia) {
+
+                const media = await message.downloadMedia();
+
+                if (media) {
+
+                    const fechaCarpeta = new Date().toISOString().split('T')[0];
+
+                    const carpeta = `evidencias/${fechaCarpeta}`;
+
+                    if (!fs.existsSync(carpeta)) {
+                        fs.mkdirSync(carpeta, { recursive: true });
+                    }
+
+                    const extension = mime.extension(media.mimetype);
+
+                    const nombreArchivo = `${Date.now()}.${extension}`;
+
+                    const rutaArchivo = path.join(carpeta, nombreArchivo);
+
+                    fs.writeFileSync(rutaArchivo, media.data, 'base64');
+
+                    console.log('📸 Evidencia guardada:', rutaArchivo);
                 }
-
-                const extension = mime.extension(media.mimetype);
-
-                const nombreArchivo = `${Date.now()}.${extension}`;
-
-                const rutaArchivo = path.join(carpeta, nombreArchivo);
-
-                fs.writeFileSync(rutaArchivo, media.data, 'base64');
-
-                console.log('📸 Evidencia guardada:', rutaArchivo);
             }
         }
+
+    } catch (error) {
+
+        console.error('❌ ERROR:', error);
+
     }
+
 });
 
 client.initialize();
