@@ -4,7 +4,8 @@ bitacora.txt
 evidencias/
 bitacoras/
 
-
+backups/
+*.sql
 
 .wwebjs_auth/
 .wwebjs_cache/
