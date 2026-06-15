@@ -1,0 +1,160 @@
+body {
+    font-family: Arial, sans-serif;
+    background: linear-gradient(
+        135deg,
+        #000000,
+        #000000
+    );
+    color: white;
+    margin: 20px;
+}
+
+h1 {
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+.card {
+    background: rgba(30, 30, 30, 0.85);
+    border-radius: 15px;
+    padding: 20px;
+    margin-bottom: 20px;
+    border-left: 5px solid #00c853;
+
+    transition: 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-3px);
+
+    box-shadow:
+        0 10px 25px rgba(
+            0,
+            0,
+            0,
+            0.4
+        );
+}
+
+img {
+    width: 120px;
+    height: 120px;
+    object-fit: cover;
+    border-radius: 10px;
+    margin: 8px;
+}
+
+.card h3 {
+    margin-top: 0;
+    font-size: 28px;
+    color: #4ade80;
+}
+
+.card p {
+
+    max-width: 900px;
+    margin-left: auto;
+    margin-right: auto;
+    margin: 6px 0;
+    line-height: 1.4;
+}
+
+.turno1 {
+    background: #1b5e20;
+}
+
+.turno2 {
+    background: #e65100;
+}
+
+.turno3 {
+    background: #0d47a1;
+}
+
+.header {
+    text-align: center;
+
+    padding: 25px;
+
+    margin-bottom: 30px;
+
+    border-radius: 20px;
+
+    background:
+        linear-gradient(
+            90deg,
+            #059669,
+            #0f766e
+        );
+
+    box-shadow:
+        0 10px 30px rgba(
+            0,
+            0,
+            0,
+            0.3
+        );
+}
+
+.header h1 {
+    margin: 0;
+    font-size: 42px;
+}
+
+.header p {
+    margin-top: 10px;
+    opacity: 0.9;
+}
+
+button {
+
+    background: #00c853;
+
+    color: white;
+
+    border: none;
+
+    padding: 10px 15px;
+
+    border-radius: 8px;
+
+    cursor: pointer;
+
+    font-weight: bold;
+
+    margin-top: 10px;
+
+    transition: 0.2s;
+}
+
+button:hover {
+
+    background: #00e676;
+
+    transform: scale(1.03);
+
+}
+
+[id^="evidencias-"] {
+
+    margin-top: 15px;
+
+    display: flex;
+
+    flex-wrap: wrap;
+
+    gap: 10px;
+
+}
+
+img {
+
+    transition: 0.2s;
+
+}
+
+img:hover {
+
+    transform: scale(1.05);
+
+}
