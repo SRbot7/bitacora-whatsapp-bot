@@ -7,6 +7,17 @@ const path = require('path');
 const pool = require('./db');
 
 
+
+// =========================
+// MEMORIA TEMPORAL
+// =========================
+
+const ultimasActividades = {};
+
+
+
+
+
 // =========================
 // CLIENTE WHATSAPP
 // =========================
@@ -671,6 +682,21 @@ if (textoOriginal.trim()) {
         actividadId =
             resultado.rows[0].id;
 
+            const claveActividad =
+    `${chat.name}_${message.author || ''}`;
+
+ultimasActividades[
+    claveActividad
+] = actividadId;
+
+console.log(
+    '🧠 Última actividad:',
+    claveActividad,
+    '=>',
+    actividadId
+);
+
+
         console.log(
             '\n✅ ACTIVIDAD GUARDADA'
         );
@@ -679,13 +705,39 @@ if (textoOriginal.trim()) {
             'Actividad ID:',
             actividadId
         );
+        
     }
 }
+
+
+
+
 
 
 // =========================
 // GUARDAR EVIDENCIA
 // =========================
+
+if (
+    !actividadId &&
+    rutaEvidencia
+) {
+
+    const claveActividad =
+        `${chat.name}_${message.author || ''}`;
+
+    actividadId =
+        ultimasActividades[
+            claveActividad
+        ];
+
+    console.log(
+        '🔎 Actividad recuperada:',
+        actividadId
+    );
+}
+
+
 
 if (
     rutaEvidencia &&
