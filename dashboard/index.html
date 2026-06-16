@@ -26,6 +26,49 @@
     </div>
 
     <script src="app.js"></script>
+<!-- MODAL IMAGEN -->
+
+    <div
+        id="modal"
+        class="modal"
+        aria-hidden="true"
+    >
+
+        <span
+            class="cerrar"
+            onclick="cerrarModal()"
+        >
+            &times;
+        </span>
+
+        <button
+            class="flecha izquierda"
+            onclick="imagenAnterior()"
+        >
+            &#10094;
+        </button>
+
+        <img
+            id="imagenModal"
+            class="modal-contenido"
+        >
+
+        <button
+            class="flecha derecha"
+            onclick="imagenSiguiente()"
+        >
+            &#10095;
+        </button>
+
+        <div
+            id="contadorImagen"
+            class="contador"
+        >
+            1 / 1
+        </div>
+
+    </div>
+
 
 </body>
 </html>

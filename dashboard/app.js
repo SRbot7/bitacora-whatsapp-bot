@@ -1,3 +1,7 @@
+let imagenesModal = [];
+
+let indiceActual = 0;
+
 async function cargarActividades() {
 
     const contenedor =
@@ -39,9 +43,23 @@ async function cargarActividades() {
 
                         <p>
                             <b>Actividad:</b>
-                            ${actividad.actividad}
                         </p>
 
+                        <div class="actividad-texto">${
+                            actividad.actividad
+                                ? actividad.actividad.trim()
+                                : 'Sin actividad'
+                            }</div>
+
+<p>
+    <b>Pendientes:</b>
+</p>
+
+<div class="actividad-texto pendientes">${
+    actividad.pendientes
+        ? actividad.pendientes.trim()
+        : '- Ninguno'
+    }</div>
                         <p>
                             <b>Turno:</b>
                             ${actividad.turno}
@@ -127,16 +145,29 @@ async function verEvidencias(
 
         contenedor.innerHTML = '';
 
+        // Crear arreglo para navegacion del modal
+        const rutas =
+            evidencias.map(
+                e => `/${e.ruta}`
+            );
+            
         evidencias.forEach(
             evidencia => {
 
                 contenedor.innerHTML += `
                     <img
+
                         src="/${evidencia.ruta}"
 
                         title="
                             ${evidencia.nombre_archivo}
                         "
+                        onclick='
+                            abrirModal(
+                                "/${evidencia.ruta}",
+                                ${JSON.stringify(rutas)}
+                            )
+                        '
                     >
                 `;
 
@@ -156,3 +187,166 @@ async function verEvidencias(
     }
 
 }
+
+function abrirModal(
+    ruta,
+    imagenes = []
+) {
+
+    imagenesModal =
+        imagenes;
+
+    indiceActual =
+        imagenes.indexOf(
+            ruta
+        );
+
+    const modal =
+        document.getElementById(
+            'modal'
+        );
+
+    const imagen =
+        document.getElementById(
+            'imagenModal'
+        );
+
+    imagen.src =
+        ruta;
+
+    actualizarContador();
+
+    modal.style.display =
+        'block';
+
+}
+
+function cerrarModal() {
+
+    document.getElementById(
+        'modal'
+    ).style.display =
+        'none';
+
+}
+
+function imagenAnterior() {
+
+    indiceActual--;
+
+    if (
+        indiceActual < 0
+    ) {
+
+        indiceActual =
+            imagenesModal.length - 1;
+
+    }
+
+    actualizarImagen();
+
+}
+
+function imagenSiguiente() {
+
+    indiceActual++;
+
+    if (
+        indiceActual >=
+        imagenesModal.length
+    ) {
+
+        indiceActual = 0;
+
+    }
+
+    actualizarImagen();
+
+}
+
+function actualizarImagen() {
+
+    document.getElementById(
+        'imagenModal'
+    ).src =
+
+        imagenesModal[
+            indiceActual
+        ];
+
+    actualizarContador();
+
+}
+
+function actualizarContador() {
+
+    document.getElementById(
+        'contadorImagen'
+    ).innerText =
+
+        `${indiceActual + 1} / ${imagenesModal.length}`;
+
+}
+
+window.onclick =
+    function(event) {
+
+        const modal =
+            document.getElementById(
+                'modal'
+            );
+
+        if (
+            event.target === modal
+        ) {
+
+            cerrarModal();
+
+        }
+
+    };
+
+document.addEventListener(
+    'keydown',
+    event => {
+
+        const modal =
+            document.getElementById(
+                'modal'
+            );
+
+        if (
+            modal.style.display !==
+            'block'
+        ) {
+
+            return;
+
+        }
+
+        switch (
+            event.key
+        ) {
+
+            case 'ArrowLeft':
+
+                imagenAnterior();
+
+                break;
+
+            case 'ArrowRight':
+
+                imagenSiguiente();
+
+                break;
+
+            case 'Escape':
+
+                cerrarModal();
+
+                break;
+
+        }
+
+    }
+);

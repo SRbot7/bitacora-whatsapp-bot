@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const moment = require('moment-timezone');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
@@ -373,12 +375,17 @@ const tecnico =
 
 const pendientesMatch =
     textoLimpio.match(
-       /^\s*pendientes\s*:?\s*([\s\S]*?)(?:^\s*t[eé]cnico\s*:|$)/im 
+        /pendientes\s*:?\s*([\s\S]*)/i
     );
 
 const pendientes =
     pendientesMatch
-        ? pendientesMatch[1].trim()
+        ? pendientesMatch[1]
+            .replace(
+                /t[eé]cnico\s*:.*$/is,
+                ''
+            )
+            .trim()
         : 'Sin pendientes';
 
 // =========================
@@ -398,7 +405,18 @@ if (actividadMatch) {
     actividad =
         actividadMatch[1]
 
-        .replace(/^\s+/gm, '')
+        // Elimina el encabezado "Actividades:"
+        .replace(
+            /^\s*actividades?\s*:?\s*/i,
+            ''
+        )
+
+        // Limpia espacios al inicio de cada línea
+        .replace(
+            /^\s+/gm,
+            ''
+        )
+
         .trim();
 }
 

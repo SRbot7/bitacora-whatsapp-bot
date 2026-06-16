@@ -158,3 +158,176 @@ img:hover {
     transform: scale(1.05);
 
 }
+
+/* NO aplicar hover al modal */
+
+.modal-contenido:hover {
+
+    transform:
+        translate(
+            -50%,
+            -50%
+        );
+
+}
+
+.actividad-texto {
+
+    white-space: pre-wrap;
+
+    text-align: left;
+
+    line-height: 1.5;
+
+    margin-top: 5px;
+
+    margin-bottom: 15px;
+
+    background: rgba(
+        255,
+        255,
+        255,
+        0.03
+    );
+
+    padding: 10px;
+
+    border-radius: 8px;
+
+}
+
+.pendientes {
+
+    border-left: 
+        3px solid #f59e0b;
+
+    padding-left: 15px;
+
+}
+
+/* =========================
+   MODAL IMAGEN
+========================= */
+
+.modal {
+
+    display: none;
+
+    position: fixed;
+
+    z-index: 9999;
+
+    left: 0;
+
+    top: 0;
+
+    width: 100%;
+
+    height: 100%;
+
+    background:
+        rgba(
+            0,
+            0,
+            0,
+            0.9
+        );
+
+}
+
+.modal-contenido {
+
+    position: absolute;
+
+    top: 50%;
+
+    left: 50%;
+
+    transform:
+        translate(
+            -50%,
+            -50%
+        );
+
+    max-width: 95vw;
+
+    max-height: 95vh;
+
+    width: auto;
+
+    height: auto;
+
+    object-fit: contain;
+
+    border-radius: 10px;
+
+}
+
+.cerrar {
+
+    position: absolute;
+
+    top: 20px;
+
+    right: 30px;
+
+    font-size: 40px;
+
+    cursor: pointer;
+
+    color: white;
+
+}
+
+.flecha {
+
+    position: absolute;
+
+    top: 50%;
+
+    transform:
+        translateY(
+            -50%
+        );
+
+    font-size: 50px;
+
+    color: white;
+
+    background: none;
+
+    border: none;
+
+    cursor: pointer;
+
+    z-index: 10000;
+
+}
+
+.izquierda {
+
+    left: 20px;
+
+}
+
+.derecha {
+
+    right: 20px;
+
+}
+
+.contador {
+
+    position: absolute;
+
+    bottom: 20px;
+
+    width: 100%;
+
+    text-align: center;
+
+    color: white;
+
+    font-size: 18px;
+
+}
