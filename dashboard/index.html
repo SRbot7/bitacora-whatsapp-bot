@@ -1,31 +1,245 @@
 <!DOCTYPE html>
-<html lang="es">
+
+<html lang="es-MX">
+
 <head>
+
+    <!-- =========================
+         METADATOS
+    ========================== -->
+
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <header class="header">
 
-    <h1>
-        🔧 Bitácora de Mantenimiento
-    </h1>
+    <meta
+        name="viewport"
+        content="
+            width=device-width,
+            initial-scale=1.0
+        "
+    >
 
-    <p>
-        Sistema automatico
-    </p>
+    <meta
+        name="description"
+        content="
+            Dashboard de mantenimiento
+            para SHP1 Pachuca
+        "
+    >
 
-</header>
+    <title>
+        Bitácora de Mantenimiento
+    </title>
 
-    <link rel="stylesheet" href="style.css">
+    <!-- =========================
+         FAVICON (FUTURO)
+    ========================== -->
+
+    <!--
+    <link
+        rel="icon"
+        href="favicon.ico"
+    >
+    -->
+
+    <!-- =========================
+         ESTILOS
+    ========================== -->
+
+    <link
+        rel="stylesheet"
+        href="style.css"
+    >
+
 </head>
+
 <body>
 
-    <h1>SHP1 - PACHUCA</h1>
+    <!-- =========================
+         ENCABEZADO PRINCIPAL
+    ========================== -->
 
-    <div id="actividades">
-        Cargando actividades...
+    <header class="header">
+
+        <h1>
+            🔧 Bitácora de Mantenimiento
+        </h1>
+
+        <p>
+            Sistema Automático
+            de Mantenimiento
+        </p>
+
+    </header>
+
+    <!-- =========================
+         NOMBRE DEL SITIO
+    ========================== -->
+
+    <h1>
+        SHP1 - PACHUCA
+    </h1>
+
+    <!-- =========================
+         KPIs Y GRÁFICAS
+         (FUTURA IMPLEMENTACIÓN)
+    ========================== -->
+
+    <!--
+    <section id="dashboard-kpis">
+
+        <div class="kpi">
+            Actividades
+        </div>
+
+        <div class="kpi">
+            Evidencias
+        </div>
+
+        <div class="kpi">
+            Técnicos
+        </div>
+
+        <div class="kpi">
+            Áreas
+        </div>
+
+    </section>
+    -->
+
+    <!-- =========================
+         CONTENEDOR PRINCIPAL
+    ========================== -->
+
+    <main>
+
+        <div id="actividades">
+
+            Cargando actividades...
+
+        </div>
+
+    </main>
+
+    <!-- =========================
+         MODAL DE IMÁGENES
+    ========================== -->
+
+    <div
+
+        id="modal"
+
+        class="modal"
+
+        aria-hidden="true"
+
+    >
+
+        <!-- =====================
+             BOTÓN CERRAR
+        ====================== -->
+
+        <span
+
+            class="cerrar"
+
+            onclick="cerrarModal()"
+
+            title="Cerrar"
+
+        >
+
+            &times;
+
+        </span>
+
+        <!-- =====================
+             IMAGEN ANTERIOR
+        ====================== -->
+
+        <span
+
+            class="
+                flecha
+                izquierda
+            "
+
+            onclick="imagenAnterior()"
+
+            title="
+                Imagen anterior
+            "
+
+        >
+
+            &#10094;
+
+        </span>
+
+        <!-- =====================
+             IMAGEN AMPLIADA
+        ====================== -->
+
+        <img
+
+            id="imagenModal"
+
+            class="
+                modal-contenido
+            "
+
+            alt="
+                Evidencia de mantenimiento
+            "
+
+        >
+
+        <!-- =====================
+             IMAGEN SIGUIENTE
+        ====================== -->
+
+        <span
+
+            class="
+                flecha
+                derecha
+            "
+
+            onclick="
+                imagenSiguiente()
+            "
+
+            title="
+                Imagen siguiente
+            "
+
+        >
+
+            &#10095;
+
+        </span>
+
+        <!-- =====================
+             CONTADOR
+        ====================== -->
+
+        <div
+            id="contadorImagen"
+        >
+
+            1 / 1
+
+        </div>
+
     </div>
 
-    <script src="app.js"></script>
+    <!-- =========================
+         JAVASCRIPT
+    ========================== -->
+
+    <script
+        src="app.js"
+    ></script>
 
 </body>
+
 </html>

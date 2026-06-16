@@ -373,13 +373,24 @@ const tecnico =
 
 const pendientesMatch =
     textoLimpio.match(
-       /^\s*pendientes\s*:?\s*([\s\S]*?)(?:^\s*t[eé]cnico\s*:|$)/im 
+
+        /pendientes\s*:?\s*([\s\S]*)/i
+
     );
 
-const pendientes =
+let pendientes =
     pendientesMatch
         ? pendientesMatch[1].trim()
         : 'Sin pendientes';
+
+// Eliminar si dentro de pendientes
+// vuelve a aparecer "Técnico:"
+
+pendientes =
+    pendientes.replace(
+        /t[eé]cnico\s*:.*$/is,
+        ''
+    ).trim();
 
 // =========================
 // ACTIVIDADES
@@ -390,7 +401,8 @@ let actividad = '';
 const actividadMatch =
     textoLimpio.match(
 
-        /(?:[aá]rea\s*:?[^\n]*)([\s\S]*?)(?:pendientes\s*:|t[eé]cnico\s*:|$)/i
+        /actividades?\s*:?\s*([\s\S]*?)(?:pendientes\s*:|t[eé]cnico\s*:|$)/i
+
     );
 
 if (actividadMatch) {
@@ -398,10 +410,10 @@ if (actividadMatch) {
     actividad =
         actividadMatch[1]
 
-        .replace(/^\s+/gm, '')
+        .replace(/\r/g, '')
+
         .trim();
 }
-
 // =========================
 // LOGS
 // =========================

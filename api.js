@@ -1,24 +1,69 @@
+// =========================
+// CARGA DE CONFIGURACIÓN
+// =========================
+
 require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
+
 const pool = require('./db');
-process.on('uncaughtException', (err) => {
-    console.error('❌ ERROR NO CAPTURADO:');
-    console.error(err);
-});
 
-process.on('unhandledRejection', (err) => {
-    console.error('❌ PROMESA RECHAZADA:');
-    console.error(err);
-});
+// =========================
+// MANEJO GLOBAL DE ERRORES
+// =========================
 
+process.on(
+    'uncaughtException',
 
+    (err) => {
+
+        console.error(
+            '❌ ERROR NO CAPTURADO:'
+        );
+
+        console.error(err);
+
+    }
+);
+
+process.on(
+    'unhandledRejection',
+
+    (err) => {
+
+        console.error(
+            '❌ PROMESA RECHAZADA:'
+        );
+
+        console.error(err);
+
+    }
+);
+
+// =========================
+// INICIALIZACIÓN DE EXPRESS
+// =========================
 
 const app = express();
 
-app.use(cors());
-app.use(express.json());
+// =========================
+// MIDDLEWARES
+// =========================
+
+// Permitir peticiones externas
+
+app.use(
+    cors()
+);
+
+// Procesar JSON
+
+app.use(
+    express.json()
+);
+
+// Dashboard web
 
 app.use(
     express.static(
@@ -26,8 +71,11 @@ app.use(
     )
 );
 
+// Servir imágenes/evidencias
+
 app.use(
     '/evidencias',
+
     express.static(
         'evidencias'
     )
@@ -37,55 +85,77 @@ app.use(
 // HEALTH CHECK
 // =========================
 
-app.get('/', (req, res) => {
+app.get(
 
-    res.json({
-        status: 'ok',
-        servicio: 'Bitacora API'
-    });
+    '/',
 
-});
+    (req, res) => {
 
-// =========================
-// ACTIVIDADES
-// =========================
+        res.json({
 
-app.get('/actividades', async (req, res) => {
+            status:
+                'ok',
 
-    try {
+            servicio:
+                'Bitacora API'
 
-        const resultado =
-            await pool.query(
-                `
-                SELECT *
-                FROM actividades_mtto
-                ORDER BY fecha DESC
-                LIMIT 100
-                `
-            );
-
-        res.json(
-            resultado.rows
-        );
-
-    } catch (error) {
-
-        console.error(error);
-
-        res.status(500).json({
-            error:
-                'Error al consultar actividades'
         });
 
     }
 
-});
+);
 
 // =========================
-// ACTIVIDAD POR ID
+// LISTAR ACTIVIDADES
 // =========================
 
 app.get(
+
+    '/actividades',
+
+    async (req, res) => {
+
+        try {
+
+            const resultado =
+                await pool.query(
+
+                    `
+                    SELECT *
+                    FROM actividades_mtto
+                    ORDER BY fecha DESC
+                    LIMIT 100
+                    `
+
+                );
+
+            res.json(
+                resultado.rows
+            );
+
+        } catch (error) {
+
+            console.error(error);
+
+            res.status(500).json({
+
+                error:
+                    'Error al consultar actividades'
+
+            });
+
+        }
+
+    }
+
+);
+
+// =========================
+// CONSULTAR ACTIVIDAD
+// =========================
+
+app.get(
+
     '/actividad/:id',
 
     async (req, res) => {
@@ -105,6 +175,7 @@ app.get(
                     `,
 
                     [id]
+
                 );
 
             res.json(
@@ -116,20 +187,24 @@ app.get(
             console.error(error);
 
             res.status(500).json({
+
                 error:
-                    'Error'
+                    'Error al consultar actividad'
+
             });
 
         }
 
     }
+
 );
 
 // =========================
-// EVIDENCIAS
+// CONSULTAR EVIDENCIAS
 // =========================
 
 app.get(
+
     '/actividad/:id/evidencias',
 
     async (req, res) => {
@@ -150,6 +225,7 @@ app.get(
                     `,
 
                     [id]
+
                 );
 
             res.json(
@@ -161,22 +237,43 @@ app.get(
             console.error(error);
 
             res.status(500).json({
+
                 error:
-                    'Error'
+                    'Error al consultar evidencias'
+
             });
 
         }
 
     }
+
 );
 
+// =========================
+// CONFIGURACIÓN DEL SERVIDOR
+// =========================
+
 const PORT =
-    process.env.API_PORT || 5000;
 
-app.listen(PORT, () => {
+    process.env.API_PORT
+    || 5000;
 
-    console.log(
-        `🚀 API escuchando en puerto ${PORT}`
-    );
+// =========================
+// INICIO DEL SERVIDOR
+// =========================
 
-});
+app.listen(
+
+    PORT,
+
+    () => {
+
+        console.log(
+
+            `🚀 API escuchando en puerto ${PORT}`
+
+        );
+
+    }
+
+);
