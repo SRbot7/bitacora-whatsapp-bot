@@ -215,6 +215,37 @@ client.on('message_create', async (message) => {
 
         const grupo = chat.name;
 
+        let tipoFuente = null;
+
+        if (
+            grupo === 'BITACORA-MTTO-SHP1'
+        ) {
+
+            tipoFuente = 'BITACORA';
+
+        }
+        else if (
+            grupo === 'Mantenimiento SHP1'
+        ) {
+
+            tipoFuente = 'INCIDENTE';
+
+        }
+        else if (
+            grupo === 'MELI SVC PACHUCA - BATIA LIMPIEZA'
+        ) {
+
+            tipoFuente = 'LIMPIEZA';
+
+        }
+        else if (
+            grupo === 'Órdenes preventivas semanales'
+        ) {
+
+            tipoFuente = 'PREVENTIVO';
+
+        }
+
         if (
 
             grupo !== 'BITACORA-MTTO-SHP1' &&
@@ -230,6 +261,11 @@ client.on('message_create', async (message) => {
             return;
 
         }
+
+        console.log(
+            'TIPO FUENTE:',
+            tipoFuente
+        );
 
         console.log(
             '\n===================='
@@ -326,16 +362,30 @@ if (
         console.log(textoOriginal);
 
         // =========================
+        // SOLO BITACORA POR AHORA
+        // =========================
+
+        if (grupo !== 'BITACORA-MTTO-SHP1') {
+
+            console.log(
+                '⏭️ Grupo pendiente de implementar:',
+                grupo
+            );
+
+            return;
+        }
+
+        // =========================
         // PARSER
         // =========================
 
         // =========================
-// NORMALIZAR TEXTO
-// =========================
+        // NORMALIZAR TEXTO
+        // =========================
 
-const textoLimpio = textoOriginal
-    .replace(/\r/g, '')
-    .trim();
+        const textoLimpio = textoOriginal
+            .replace(/\r/g, '')
+            .trim();
 
 // =========================
 // TURNO
