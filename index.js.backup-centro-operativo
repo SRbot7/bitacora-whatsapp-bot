@@ -210,25 +210,15 @@ client.on('message_create', async (message) => {
         }
 
         // =========================
-        // ROUTER DE GRUPOS
+        // FILTRO BITACORA
         // =========================
 
-        const grupo = chat.name;
-
         if (
-
-            grupo !== 'BITACORA-MTTO-SHP1' &&
-
-            grupo !== 'Mantenimiento SHP1' &&
-
-            grupo !== 'MELI SVC PACHUCA - BATIA LIMPIEZA' &&
-
-            grupo !== 'Órdenes preventivas semanales'
-
+            !chat.name
+                .toUpperCase()
+                .includes('BITACORA')
         ) {
-
             return;
-
         }
 
         console.log(
