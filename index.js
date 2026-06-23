@@ -379,28 +379,243 @@ if (
             tipoFuente === 'SUPERVISOR'
         ) {
 
+            let prioridad = 'MEDIA';
+
+            let descripcion =
+                textoOriginal.trim();
+
+            let categoria = 'GENERAL';
+
+            // =========================
+            // CERRAR PENDIENTE
+            // =========================
+
+            const cerrarMatch =
+                descripcion.match(
+                    /^(DONE|CERRAR)\s+(\d+)$/i
+                );
+
+            if (cerrarMatch) {
+
+                const idPendiente =
+                    cerrarMatch[2];
+
+                const resultado =
+                    await pool.query(
+
+                        `
+                        UPDATE pendientes_supervisor
+                        SET
+                            estado = 'Completado',
+                            fecha_cierre = NOW()
+                        WHERE id = $1
+                        RETURNING id
+                        `,
+
+                        [idPendiente]
+
+                    );
+
+                if (
+                    resultado.rows.length > 0
+                ) {
+
+                    console.log(
+                        `✅ Pendiente ${idPendiente} completado`
+                    );
+
+                } else {
+
+                    console.log(
+                        `⚠️ Pendiente ${idPendiente} no encontrado`
+                    );
+
+                }
+
+                return;
+            }
+            // =========================
+            // LISTAR PENDIENTES
+            // =========================
+
+            if (
+                descripcion
+                    .toUpperCase()
+                    .trim() === 'LISTAR'
+            ) {
+
+                const pendientes =
+                    await pool.query(
+
+                        `
+                        SELECT
+                            id,
+                            descripcion,
+                            prioridad,
+                            categoria
+                        FROM pendientes_supervisor
+                        WHERE estado = 'Pendiente'
+                        ORDER BY
+
+                            CASE prioridad
+
+                                WHEN 'ALTA'
+                                    THEN 1
+
+                                WHEN 'MEDIA'
+                                    THEN 2
+
+                                WHEN 'BAJA'
+                                    THEN 3
+
+                                ELSE 4
+
+                            END,
+
+                            fecha DESC
+                        `
+                    );
+
+                console.log(
+                    '\n📋 PENDIENTES ABIERTOS\n'
+                );
+
+                pendientes.rows.forEach(
+                    p => {
+
+                        console.log(
+
+                            `[${p.id}] ` +
+
+                            `${p.prioridad} | ` +
+
+                            `${p.categoria}\n` +
+
+                            `${p.descripcion}\n`
+
+                        );
+
+                    }
+                );
+
+                return;
+            }
+
+
+
+            if (
+                descripcion
+                    .toUpperCase()
+                    .startsWith('ALTA:')
+            ) {
+
+                prioridad = 'ALTA';
+
+                descripcion =
+                    descripcion.substring(5).trim();
+
+            }
+            else if (
+                descripcion
+                    .toUpperCase()
+                    .startsWith('MEDIA:')
+            ) {
+
+                prioridad = 'MEDIA';
+
+                descripcion =
+                    descripcion.substring(6).trim();
+
+            }
+            else if (
+                descripcion
+                    .toUpperCase()
+                    .startsWith('BAJA:')
+            ) {
+
+                prioridad = 'BAJA';
+
+                descripcion =
+                    descripcion.substring(5).trim();
+
+            }
+            if (
+                descripcion
+                    .toUpperCase()
+                    .startsWith('PROYECTO:')
+            ) {
+
+                categoria = 'PROYECTO';
+
+                descripcion =
+                    descripcion.substring(9).trim();
+
+            }
+            else if (
+                descripcion
+                    .toUpperCase()
+                    .startsWith('MATERIAL:')
+            ) {
+
+                categoria = 'MATERIAL';
+
+                descripcion =
+                    descripcion.substring(9).trim();
+
+            }
+            else if (
+                descripcion
+                    .toUpperCase()
+                    .startsWith('COMPRA:')
+            ) {
+
+                categoria = 'COMPRA';
+
+                descripcion =
+                    descripcion.substring(7).trim();
+
+            }
+            else if (
+                descripcion
+                    .toUpperCase()
+                    .startsWith('RIESGO:')
+            ) {
+
+                categoria = 'RIESGO';
+
+                descripcion =
+                    descripcion.substring(7).trim();
+
+            }
+
             await pool.query(
 
                 `
                 INSERT INTO pendientes_supervisor
                 (
-                    descripcion
+                    descripcion,
+                    prioridad,
+                    categoria
                 )
                 VALUES
                 (
-                    $1
+                    $1,
+                    $2,
+                    $3
                 )
                 `,
 
                 [
-                    textoOriginal.trim()
+                    descripcion,
+                    prioridad,
+                    categoria
                 ]
 
             );
 
             console.log(
-                '📋 Pendiente supervisor guardado'
-            );
+            `📋 Pendiente guardado [${prioridad}] [${categoria}]`
+        );
 
             return;
         }
