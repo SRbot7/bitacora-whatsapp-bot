@@ -387,6 +387,248 @@ if (
             let categoria = 'GENERAL';
 
             // =========================
+            // AYUDA
+            // =========================
+
+            if (
+
+                descripcion
+                    .toUpperCase()
+                    .trim() === 'AYUDA'
+
+            ) {
+
+                const ayuda =
+
+            `📋 COMANDOS SUPERVISOR
+
+            🔎 CONSULTAS
+
+            AYUDA
+            Muestra este menú
+
+            LISTAR
+            Lista pendientes abiertos
+
+            ABIERTOS
+            Cantidad de pendientes abiertos
+
+            CERRADOS
+            Cantidad de pendientes completados
+
+            RIESGOS
+            Lista riesgos pendientes
+
+            MATERIALES
+            Lista materiales pendientes
+
+
+            ✅ CIERRE
+
+            CERRAR <id>
+
+            Ejemplo:
+            CERRAR 7
+
+
+            🚨 PRIORIDADES
+
+            ALTA:
+            MEDIA:
+            BAJA:
+
+
+            📂 CATEGORIAS
+
+            PROYECTO:
+            MATERIAL:
+            COMPRA:
+            RIESGO:
+
+
+            📝 EJEMPLOS
+
+            ALTA:
+            Comprar 20 topes de andén
+
+            MATERIAL:
+            20 focos LED
+
+            RIESGO:
+            Bakers dañados en área de sorteo
+
+            PROYECTO:
+            Dashboard limpieza
+            
+            ℹ️ SISTEMA
+
+            Supervisor v1.1`;
+
+                await message.reply(
+                    ayuda
+                );
+
+                console.log(
+                    '📤 Ayuda enviada'
+                );
+
+                return;
+            }
+            if (
+                descripcion
+                    .toUpperCase()
+                    .trim() === 'ABIERTOS'
+            ) {
+
+                const resultado =
+                    await pool.query(
+
+                        `
+                        SELECT COUNT(*) total
+                        FROM pendientes_supervisor
+                        WHERE estado = 'Pendiente'
+                        `
+                    );
+
+                await message.reply(
+
+                    `📋 Pendientes abiertos: ${resultado.rows[0].total}`
+
+                );
+
+                return;
+            }
+
+            if (
+                descripcion
+                    .toUpperCase()
+                    .trim() === 'CERRADOS'
+            ) {
+
+                const resultado =
+                    await pool.query(
+
+                        `
+                        SELECT COUNT(*) total
+                        FROM pendientes_supervisor
+                        WHERE estado = 'Completado'
+                        `
+                    );
+
+                await message.reply(
+
+                    `✅ Pendientes cerrados: ${resultado.rows[0].total}`
+
+                );
+
+                return;
+            }
+
+
+            if (
+                descripcion
+                    .toUpperCase()
+                    .trim() === 'RIESGOS'
+            ) {
+
+                const resultado =
+                    await pool.query(
+
+                        `
+                        SELECT
+                            id,
+                            descripcion,
+                            prioridad
+                        FROM pendientes_supervisor
+                        WHERE
+                            categoria = 'RIESGO'
+                            AND estado = 'Pendiente'
+                        ORDER BY fecha DESC
+                        `
+                    );
+
+                let respuesta =
+                    '⚠️ RIESGOS ABIERTOS\n\n';
+
+                resultado.rows.forEach(
+                    r => {
+
+                        respuesta +=
+                            `[${r.id}] ${r.prioridad}\n` +
+                            `${r.descripcion}\n\n`;
+
+                    }
+                );
+
+                if (
+                    resultado.rows.length === 0
+                ) {
+
+                    respuesta =
+                        '✅ No hay riesgos abiertos';
+
+                }
+
+                await message.reply(
+                    respuesta
+                );
+
+                return;
+            }
+
+
+            if (
+                descripcion
+                    .toUpperCase()
+                    .trim() === 'MATERIALES'
+            ) {
+
+                const resultado =
+                    await pool.query(
+
+                        `
+                        SELECT
+                            id,
+                            descripcion,
+                            prioridad
+                        FROM pendientes_supervisor
+                        WHERE
+                            categoria = 'MATERIAL'
+                            AND estado = 'Pendiente'
+                        ORDER BY fecha DESC
+                        `
+                    );
+
+                let respuesta =
+                    '📦 MATERIALES PENDIENTES\n\n';
+
+                resultado.rows.forEach(
+                    r => {
+
+                        respuesta +=
+                            `[${r.id}] ${r.prioridad}\n` +
+                            `${r.descripcion}\n\n`;
+
+                    }
+                );
+
+                if (
+                    resultado.rows.length === 0
+                ) {
+
+                    respuesta =
+                        '✅ No hay materiales pendientes';
+
+                }
+
+                await message.reply(
+                    respuesta
+                );
+
+                return;
+            }
+
+            // =========================
             // CERRAR PENDIENTE
             // =========================
 
@@ -419,6 +661,12 @@ if (
                 if (
                     resultado.rows.length > 0
                 ) {
+
+                    await message.reply(
+
+                        `✅ Pendiente ${idPendiente} completado`
+
+                    );
 
                     console.log(
                         `✅ Pendiente ${idPendiente} completado`
@@ -476,26 +724,50 @@ if (
                         `
                     );
 
-                console.log(
-                    '\n📋 PENDIENTES ABIERTOS\n'
-                );
+                let respuesta =
+                    '📋 PENDIENTES ABIERTOS\n\n';
 
                 pendientes.rows.forEach(
                     p => {
 
-                        console.log(
+                        const icono =
 
-                            `[${p.id}] ` +
+                            p.prioridad === 'ALTA'
+                                ? '🔴'
+
+                            : p.prioridad === 'MEDIA'
+                                ? '🟡'
+
+                            : '🟢';
+
+                        respuesta +=
+
+                            `[${p.id}] ${icono} ` +
 
                             `${p.prioridad} | ` +
 
                             `${p.categoria}\n` +
 
-                            `${p.descripcion}\n`
-
-                        );
+                            `${p.descripcion}\n\n`;
 
                     }
+                );
+
+                if (
+                    pendientes.rows.length === 0
+                ) {
+
+                    respuesta =
+                        '✅ No hay pendientes abiertos';
+
+                }
+
+                await message.reply(
+                    respuesta
+                );
+
+                console.log(
+                    '📤 Lista enviada a WhatsApp'
                 );
 
                 return;
