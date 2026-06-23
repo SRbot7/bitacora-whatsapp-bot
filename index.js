@@ -245,6 +245,13 @@ client.on('message_create', async (message) => {
             tipoFuente = 'PREVENTIVO';
 
         }
+        else if (
+            grupo === 'Pendientes MTTO SHP1'
+        ) {
+
+            tipoFuente = 'SUPERVISOR';
+
+        }
 
         if (
 
@@ -254,7 +261,9 @@ client.on('message_create', async (message) => {
 
             grupo !== 'MELI SVC PACHUCA - BATIA LIMPIEZA' &&
 
-            grupo !== 'Órdenes preventivas semanales'
+            grupo !== 'Órdenes preventivas semanales' &&
+
+            grupo !== 'Pendientes MTTO SHP1'
 
         ) {
 
@@ -360,6 +369,41 @@ if (
         );
 
         console.log(textoOriginal);
+
+
+        // =========================
+        // SUPERVISOR
+        // =========================
+
+        if (
+            tipoFuente === 'SUPERVISOR'
+        ) {
+
+            await pool.query(
+
+                `
+                INSERT INTO pendientes_supervisor
+                (
+                    descripcion
+                )
+                VALUES
+                (
+                    $1
+                )
+                `,
+
+                [
+                    textoOriginal.trim()
+                ]
+
+            );
+
+            console.log(
+                '📋 Pendiente supervisor guardado'
+            );
+
+            return;
+        }
 
         // =========================
         // SOLO BITACORA POR AHORA
