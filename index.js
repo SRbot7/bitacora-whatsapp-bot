@@ -15,7 +15,7 @@ const pool = require('./db');
 // =========================
 
 const ultimasActividades = {};
-
+const ultimosPendientes = {};
 
 
 
@@ -201,6 +201,8 @@ client.on('message_create', async (message) => {
 
         const chat = await message.getChat();
 
+        let pendienteId = null;
+
         // =========================
         // SOLO GRUPOS
         // =========================
@@ -246,7 +248,7 @@ client.on('message_create', async (message) => {
 
         }
         else if (
-            grupo === 'Pendientes MTTO SHP1'
+            grupo === 'Centro Operativo SHP1'
         ) {
 
             tipoFuente = 'SUPERVISOR';
@@ -263,7 +265,7 @@ client.on('message_create', async (message) => {
 
             grupo !== 'Órdenes preventivas semanales' &&
 
-            grupo !== 'Pendientes MTTO SHP1'
+            grupo !== 'Centro Operativo SHP1'
 
         ) {
 
@@ -385,6 +387,105 @@ if (
                 textoOriginal.trim();
 
             let categoria = 'GENERAL';
+
+
+
+            // =========================
+            // TIPO DE REGISTRO
+            // =========================
+
+            let tipoRegistro = null;
+
+            if (
+                descripcion
+                    .toUpperCase()
+                    .startsWith('PENDIENTE:')
+            ) {
+
+                tipoRegistro = 'PENDIENTE';
+
+            }
+            else if (
+                descripcion
+                    .toUpperCase()
+                    .startsWith('MATERIAL:')
+            ) {
+
+                tipoRegistro = 'MATERIAL';
+
+            }
+            else if (
+                descripcion
+                    .toUpperCase()
+                    .startsWith('PROYECTO:')
+            ) {
+
+                tipoRegistro = 'PROYECTO';
+
+            }
+
+            console.log(
+                'TIPO REGISTRO:',
+                tipoRegistro
+            );
+
+
+            if (
+
+                !tipoRegistro &&
+
+                !message.hasMedia &&
+
+                descripcion.toUpperCase() !== 'AYUDA' &&
+
+                descripcion.toUpperCase() !== 'LISTAR' &&
+
+                descripcion.toUpperCase() !== 'MATERIALES' &&
+
+                descripcion.toUpperCase() !== 'PROYECTOS' &&
+
+                descripcion.toUpperCase() !== 'ABIERTOS' &&
+
+                descripcion.toUpperCase() !== 'CERRADOS' &&
+
+                !descripcion
+                    .toUpperCase()
+                    .startsWith('CERRAR ')
+
+            ) {
+
+                console.log(
+                    '⏭️ Mensaje ignorado'
+                );
+
+                return;
+            }
+
+
+            // =========================
+            // IGNORAR RESPUESTAS DEL BOT
+            // =========================
+
+            if (
+
+                descripcion.startsWith('📋') ||
+
+                descripcion.startsWith('✅') ||
+
+                descripcion.startsWith('📦') ||
+
+                descripcion.startsWith('⚠️') ||
+
+                descripcion.startsWith('ℹ️')
+
+            ) {
+
+                console.log(
+                    '🤖 Mensaje generado por el bot ignorado'
+                );
+
+                return;
+            }
 
             // =========================
             // AYUDA
@@ -860,51 +961,192 @@ if (
 
             }
 
-            await pool.query(
+            // =========================
+            // PENDIENTE
+            // =========================
 
-                `
-                INSERT INTO pendientes_supervisor
-                (
-                    descripcion,
-                    prioridad,
-                    categoria
-                )
-                VALUES
-                (
-                    $1,
-                    $2,
-                    $3
-                )
-                `,
+            if (
+                tipoRegistro === 'PENDIENTE'
+            ) {
 
-                [
-                    descripcion,
-                    prioridad,
-                    categoria
-                ]
+                //console.log(
+                //    '🚧 Registrar pendiente'
+                //);
 
-            );
+                //return;
 
-            console.log(
-            `📋 Pendiente guardado [${prioridad}] [${categoria}]`
-        );
+                const area =
+                    descripcion.match(
+                        /AREA:\s*(.+)/i
+                    )?.[1]?.trim() || '';
 
-            return;
+                const tipoMtto =
+                    descripcion.match(
+                        /TIPO:\s*(.+)/i
+                    )?.[1]?.trim()
+                    || 'CORRECTIVO';
+
+                const prioridad =
+                    descripcion.match(
+                        /PRIORIDAD:\s*(.+)/i
+                    )?.[1]?.trim()
+                    || 'MEDIA';
+
+                const turno =
+                    descripcion.match(
+                        /TURNO:\s*(.+)/i
+                    )?.[1]?.trim()
+                    || '';
+
+                const tecnicos =
+                    descripcion.match(
+                        /TECNICOS:\s*(.+)/i
+                    )?.[1]?.trim()
+                    || '';
+
+                const fechaProgramada =
+                    descripcion.match(
+                        /FECHA:\s*(.+)/i
+                    )?.[1]?.trim()
+                    || null;
+
+
+                    const pendienteMatch =
+                        descripcion.match(
+                            /PENDIENTE:\s*([\s\S]*?)\n\s*AREA:/i
+                        );
+
+                    const descripcionPendiente =
+                        pendienteMatch
+                            ? pendienteMatch[1].trim()
+                            : '';
+                    
+                    let fechaSql = null;
+
+                    if (fechaProgramada) {
+
+                        const partes =
+                            fechaProgramada.split('/');
+
+                        fechaSql =
+                            `${partes[2]}-${partes[1]}-${partes[0]}`;
+                    }
+
+                    const resultado =
+                        await pool.query(
+
+                            `
+                            INSERT INTO pendientes_supervisor
+                            (
+                                descripcion,
+                                area,
+                                tipo_mtto,
+                                prioridad,
+                                turno,
+                                tecnicos,
+                                fecha_programada,
+                                creado_por
+                            )
+                            VALUES
+                            (
+                                $1,
+                                $2,
+                                $3,
+                                $4,
+                                $5,
+                                $6,
+                                $7,
+                                $8
+                            )
+                            RETURNING id
+                            `,
+                            [
+                                descripcionPendiente,
+                                area,
+                                tipoMtto.toUpperCase(),
+                                prioridad.toUpperCase(),
+                                turno,
+                                tecnicos,
+                                fechaSql,
+                                nombreAutor
+                            ]
+                        );
+
+                    let idPendiente =
+                        resultado.rows[0].id;
+
+                    pendienteId =
+                        idPendiente;
+
+                    const clavePendiente =
+                        `${chat.name}_${message.author || ''}`;
+
+                    ultimosPendientes[
+                        clavePendiente
+                    ] = idPendiente;
+
+                    console.log(
+                        '🧠 Último pendiente:',
+                        clavePendiente,
+                        '=>',
+                        idPendiente
+                    );
+
+                    console.log(
+                        `✅ Pendiente ${idPendiente} guardado`
+                    );
+
+                    await message.reply(
+                        `✅ Pendiente registrado\n\nID: ${idPendiente}`
+                    );
+
+            }
+
+            // =========================
+            // MATERIAL
+            // =========================
+
+            if (
+                tipoRegistro === 'MATERIAL'
+            ) {
+
+                console.log(
+                    '📦 Registrar material'
+                );
+
+                return;
+            }
+
+            // =========================
+            // PROYECTO
+            // =========================
+
+            if (
+                tipoRegistro === 'PROYECTO'
+            ) {
+
+                console.log(
+                    '🏗️ Registrar proyecto'
+                );
+
+                return;
+            }
+
+          
         }
 
         // =========================
-        // SOLO BITACORA POR AHORA
+        // SOLO BITACORA
         // =========================
 
-        if (grupo !== 'BITACORA-MTTO-SHP1') {
-
-            console.log(
-                '⏭️ Grupo pendiente de implementar:',
-                grupo
-            );
-
+        if (
+            tipoFuente !== 'BITACORA' &&
+            tipoFuente !== 'SUPERVISOR'
+        ) {
             return;
         }
+
+
 
         // =========================
         // PARSER
@@ -1098,6 +1340,8 @@ ${textoOriginal}
 
         let rutaEvidencia = '';
         let actividadId = null;
+    
+        
 
         if (message.hasMedia) {
 
@@ -1346,7 +1590,59 @@ if (
     );
 }
 
+if (
+    !pendienteId &&
+    rutaEvidencia
+) {
 
+    const clavePendiente =
+        `${chat.name}_${message.author || ''}`;
+
+    pendienteId =
+        ultimosPendientes[
+            clavePendiente
+        ];
+
+    console.log(
+        '🔎 Pendiente recuperado:',
+        pendienteId
+    );
+}
+
+if (
+    rutaEvidencia &&
+    pendienteId
+) {
+
+    await pool.query(
+
+        `
+        INSERT INTO evidencias_pendientes
+        (
+            pendiente_id,
+            ruta,
+            nombre_archivo
+        )
+        VALUES
+        (
+            $1,
+            $2,
+            $3
+        )
+        `,
+        [
+            pendienteId,
+            rutaEvidencia,
+            path.basename(
+                rutaEvidencia
+            )
+        ]
+    );
+
+    console.log(
+        '✅ EVIDENCIA DE PENDIENTE RELACIONADA'
+    );
+}
 
 if (
     rutaEvidencia &&
