@@ -17,6 +17,7 @@ const pool = require('./db');
 const ultimasActividades = {};
 const ultimosPendientes = {};
 const ultimosMateriales = {};
+const ultimosProyectos = {};
 
 
 
@@ -1235,19 +1236,127 @@ if (
             // =========================
             // PROYECTO
             // =========================
-
             if (
                 tipoRegistro === 'PROYECTO'
             ) {
 
+                const nombreProyecto =
+                    descripcion.match(
+                        /PROYECTO:\s*([\s\S]*?)\n\s*DESCRIPCION:/i
+                    )?.[1]?.trim() || '';
+
+                const descripcionProyecto =
+                    descripcion.match(
+                        /DESCRIPCION:\s*([\s\S]*?)\n\s*AREA:/i
+                    )?.[1]?.trim() || '';
+
+                const area =
+                    descripcion.match(
+                        /AREA:\s*(.+)/i
+                    )?.[1]?.trim() || '';
+
+                const prioridad =
+                    descripcion.match(
+                        /PRIORIDAD:\s*(.+)/i
+                    )?.[1]?.trim() || 'MEDIA';
+
+                const responsable =
+                    descripcion.match(
+                        /RESPONSABLE:\s*(.+)/i
+                    )?.[1]?.trim() || '';
+
+                const tecnicos =
+                    descripcion.match(
+                        /TECNICOS:\s*(.+)/i
+                    )?.[1]?.trim() || '';
+
+                const turno =
+                    descripcion.match(
+                        /TURNO:\s*(.+)/i
+                    )?.[1]?.trim() || '';
+
+                const fechaProgramada =
+                    descripcion.match(
+                        /FECHA:\s*(.+)/i
+                    )?.[1]?.trim() || null;
+
+                const costo =
+                    descripcion.match(
+                        /COSTO:\s*(.+)/i
+                    )?.[1]?.trim() || null;
+
+                let fechaSql = null;
+
+                if (fechaProgramada) {
+
+                    const partes =
+                        fechaProgramada.split('/');
+
+                    fechaSql =
+                        `${partes[2]}-${partes[1]}-${partes[0]}`;
+                }
+
+                const resultado =
+                    await pool.query(
+
+                        `
+                        INSERT INTO proyectos_mtto
+                        (
+                            nombre,
+                            descripcion,
+                            area,
+                            prioridad,
+                            responsable,
+                            tecnicos,
+                            turno,
+                            fecha_programada,
+                            costo_estimado,
+                            creado_por
+                        )
+                        VALUES
+                        (
+                            $1,$2,$3,$4,$5,
+                            $6,$7,$8,$9,$10
+                        )
+                        RETURNING id
+                        `,
+                        [
+                            nombreProyecto,
+                            descripcionProyecto,
+                            area,
+                            prioridad.toUpperCase(),
+                            responsable,
+                            tecnicos,
+                            turno,
+                            fechaSql,
+                            costo || null,
+                            nombreAutor
+                        ]
+                    );
+
+                const idProyecto =
+                    resultado.rows[0].id;
+
+                const claveProyecto =
+                    `${chat.name}_${message.author || ''}`;
+
+                ultimosProyectos[
+                    claveProyecto
+                ] = idProyecto;
+
                 console.log(
-                    '🏗️ Registrar proyecto'
+                    '🧠 Último proyecto:',
+                    claveProyecto,
+                    '=>',
+                    idProyecto
+                );
+
+                await message.reply(
+                    `✅ Proyecto registrado\n\nID: ${idProyecto}`
                 );
 
                 return;
-            }
-
-          
+            }        
         }
 
         // =========================
@@ -1456,7 +1565,9 @@ ${textoOriginal}
         let rutaEvidencia = '';
         let actividadId = null;
         let materialId = null;
-    
+        let proyectoId = null;
+           
+
         
 
         if (message.hasMedia) {
@@ -1707,6 +1818,25 @@ if (
 }
 
 if (
+    rutaEvidencia &&
+    !proyectoId
+) {
+
+    const claveProyecto =
+        `${chat.name}_${message.author || ''}`;
+
+    proyectoId =
+        ultimosProyectos[
+            claveProyecto
+        ];
+
+    console.log(
+        '🔎 Proyecto recuperado:',
+        proyectoId
+    );
+}
+
+if (
     !pendienteId &&
     rutaEvidencia
 ) {
@@ -1743,6 +1873,45 @@ if (
         materialId
     );
 }
+
+
+if (
+    rutaEvidencia &&
+    proyectoId
+) {
+
+    await pool.query(
+
+        `
+        INSERT INTO evidencias_proyectos
+        (
+            proyecto_id,
+            ruta,
+            nombre_archivo
+        )
+        VALUES
+        (
+            $1,
+            $2,
+            $3
+        )
+        `,
+        [
+            proyectoId,
+            rutaEvidencia,
+            path.basename(
+                rutaEvidencia
+            )
+        ]
+    );
+
+    console.log(
+        '✅ EVIDENCIA DE PROYECTO RELACIONADA'
+    );
+}
+
+
+
 
 if (
     rutaEvidencia &&
