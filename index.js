@@ -430,30 +430,27 @@ if (
                 tipoRegistro
             );
 
-
             if (
 
                 !tipoRegistro &&
 
-                !message.hasMedia &&
-
                 descripcion.toUpperCase() !== 'AYUDA' &&
-
+                descripcion.toUpperCase() !== 'AYUDA PENDIENTES' &&
+                descripcion.toUpperCase() !== 'AYUDA MATERIALES' &&
+                descripcion.toUpperCase() !== 'AYUDA PROYECTOS' &&
+                descripcion.toUpperCase() !== 'AYUDA EVIDENCIAS' &&
                 descripcion.toUpperCase() !== 'LISTAR' &&
-
                 descripcion.toUpperCase() !== 'MATERIALES' &&
-
                 descripcion.toUpperCase() !== 'PROYECTOS' &&
-
                 descripcion.toUpperCase() !== 'ABIERTOS' &&
-
                 descripcion.toUpperCase() !== 'CERRADOS' &&
-
                 !descripcion
                     .toUpperCase()
                     .startsWith('CERRAR ')
 
-            ) {
+            )
+            
+            {
 
                 console.log(
                     '⏭️ Mensaje ignorado'
@@ -492,115 +489,200 @@ if (
             // AYUDA
             // =========================
 
-            if (
-
+           if (
                 descripcion
                     .toUpperCase()
                     .trim() === 'AYUDA'
-
             ) {
 
-                const ayuda = `🤖 CENTRO OPERATIVO SHP1
+                const ayuda = `
+            🤖 CENTRO OPERATIVO SHP1
 
-                    📋 COMANDOS
+            📋 MENÚ DE AYUDA
 
-                    📌 CONSULTAS
-                    AYUDA
-                    LISTAR
-                    ABIERTOS
-                    CERRADOS
+            AYUDA
+            Muestra este menú.
 
-                    ━━━━━━━━━━━━━━━
-                    🚧 NUEVO PENDIENTE
-                    ━━━━━━━━━━━━━━━
+            AYUDA PENDIENTES
+            Comandos de pendientes.
 
-                    PENDIENTE:
-                    Descripción del trabajo
+            AYUDA MATERIALES
+            Comandos de materiales.
 
-                    AREA:
-                    Andén 2
+            AYUDA PROYECTOS
+            Comandos de proyectos.
 
-                    TIPO:
-                    CORRECTIVO
+            AYUDA EVIDENCIAS
+            Información sobre fotografías.
 
-                    PRIORIDAD:
-                    ALTA
+            ━━━━━━━━━━━━━━━
+            CONSULTAS
+            ━━━━━━━━━━━━━━━
 
-                    TURNO:
-                    2
+            LISTAR
+            ABIERTOS
+            CERRADOS
+            PROYECTOS
+            MATERIALES
+            `;
 
-                    TECNICOS:
-                    Saul Romero|Eliezer Romero
-
-                    FECHA:
-                    30/06/2026
-
-                    ━━━━━━━━━━━━━━━
-                    📦 NUEVA REQUISICIÓN DE MATERIAL
-                    ━━━━━━━━━━━━━━━
-
-                    MATERIAL:
-                    Taladro de impacto Milwaukee
-
-                    CANTIDAD:
-                    1
-
-                    UNIDAD:
-                    PZA
-
-                    PRIORIDAD:
-                    ALTA
-
-                    AREA:
-                    Andén 2
-
-                    JUSTIFICACION:
-                    Sustituir herramienta dañada.
-
-                    ━━━━━━━━━━━━━━━
-                    🏗️ NUEVO PROYECTO
-                    ━━━━━━━━━━━━━━━
-
-                    PROYECTO:
-                    Instalación de iluminación LED en andenes
-
-                    AREA:
-                    Andén 2
-
-                    PRIORIDAD:
-                    MEDIA
-
-                    RESPONSABLE:
-                    Saul Romero
-
-                    TECNICOS:
-                    Saul Romero|Eliezer Romero
-
-                    FECHA:
-                    30/06/2026
-
-                    OBSERVACIONES:
-                    Realizar por etapas.
-
-                    ━━━━━━━━━━━━━━━
-                    🔒 CERRAR PENDIENTE
-                    ━━━━━━━━━━━━━━━
-
-                    CERRAR 42
-
-                    📸 EVIDENCIAS
-
-                    Después de registrar un pendiente, material o proyecto puedes enviar fotografías y quedarán ligadas automáticamente al último registro creado.`;
-
-                await message.reply(
-                    ayuda
-                );
-
-                console.log(
-                    '📤 Ayuda enviada'
-                );
+                await message.reply(ayuda);
 
                 return;
+            }
+
+
+            if (
+                descripcion
+                    .toUpperCase()
+                    .trim() === 'AYUDA PENDIENTES'
+            ) {
+
+                const ayuda = `
+            🚧 REGISTRO DE PENDIENTES
+
+            PENDIENTE:
+            Descripción del trabajo
+
+            AREA:
+            Área
+
+            TIPO:
+            CORRECTIVO
+
+            PRIORIDAD:
+            ALTA
+
+            TURNO:
+            2
+
+            TECNICOS:
+            Saul Romero|Eliezer Romero
+
+            FECHA:
+            30/06/2026
+
+            ━━━━━━━━━━━━━━━
+
+            LISTAR
+            Muestra pendientes abiertos.
+
+            CERRAR <ID>
+
+            Ejemplo:
+
+            CERRAR 42
+            `;
+
+                await message.reply(ayuda);
+
+                return;
+            }
+
+
+            if (
+                descripcion
+                    .toUpperCase()
+                    .trim() === 'AYUDA MATERIALES'
+            ) {
+
+                const ayuda = `
+            📦 REQUISICIÓN DE MATERIAL
+
+            MATERIAL:
+            Taladro de impacto Milwaukee
+
+            CANTIDAD:
+            1
+
+            UNIDAD:
+            PZA
+
+            PRIORIDAD:
+            ALTA
+
+            AREA:
+            Andén 2
+
+            JUSTIFICACION:
+            Sustituir herramienta dañada.
+            `;
+
+                await message.reply(ayuda);
+
+                return;
+            }
+
+
+            if (
+                descripcion
+                    .toUpperCase()
+                    .trim() === 'AYUDA PROYECTOS'
+            ) {
+
+                const ayuda = `
+            🏗️ REGISTRO DE PROYECTOS
+
+            PROYECTO:
+            Instalación de iluminación almacén
+
+            DESCRIPCION:
+            Instalación de 8 lámparas LED.
+
+            AREA:
+            Almacén
+
+            PRIORIDAD:
+            ALTA
+
+            RESPONSABLE:
+            Saul Romero
+
+            TECNICOS:
+            Saul Romero|Eliezer Romero
+
+            TURNO:
+            2
+
+            FECHA:
+            30/06/2026
+
+            COSTO:
+            15000
+            `;
+
+                await message.reply(ayuda);
+
+                return;
+            }
+
+
+            if (
+                descripcion
+                    .toUpperCase()
+                    .trim() === 'AYUDA EVIDENCIAS'
+            ) {
+
+                const ayuda = `
+            📸 EVIDENCIAS
+
+            Las fotografías enviadas después de registrar:
+
+            • un pendiente
+            • un material
+            • un proyecto
+
+            quedarán ligadas automáticamente al último registro creado por el mismo usuario.
+
+            Puedes enviar una o varias fotografías.
+            `;
+
+                await message.reply(ayuda);
+
+                return;
+            }
+
+
             }
             if (
                 descripcion
@@ -1357,7 +1439,7 @@ if (
 
                 return;
             }        
-        }
+        
 
         // =========================
         // SOLO BITACORA
