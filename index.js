@@ -16,7 +16,7 @@ const pool = require('./db');
 
 const ultimasActividades = {};
 const ultimosPendientes = {};
-
+const ultimosMateriales = {};
 
 
 
@@ -499,71 +499,97 @@ if (
 
             ) {
 
-                const ayuda =
+                const ayuda = `🤖 CENTRO OPERATIVO SHP1
 
-            `📋 COMANDOS SUPERVISOR
+                    📋 COMANDOS
 
-            🔎 CONSULTAS
+                    📌 CONSULTAS
+                    AYUDA
+                    LISTAR
+                    ABIERTOS
+                    CERRADOS
 
-            AYUDA
-            Muestra este menú
+                    ━━━━━━━━━━━━━━━
+                    🚧 NUEVO PENDIENTE
+                    ━━━━━━━━━━━━━━━
 
-            LISTAR
-            Lista pendientes abiertos
+                    PENDIENTE:
+                    Descripción del trabajo
 
-            ABIERTOS
-            Cantidad de pendientes abiertos
+                    AREA:
+                    Andén 2
 
-            CERRADOS
-            Cantidad de pendientes completados
+                    TIPO:
+                    CORRECTIVO
 
-            RIESGOS
-            Lista riesgos pendientes
+                    PRIORIDAD:
+                    ALTA
 
-            MATERIALES
-            Lista materiales pendientes
+                    TURNO:
+                    2
 
+                    TECNICOS:
+                    Saul Romero|Eliezer Romero
 
-            ✅ CIERRE
+                    FECHA:
+                    30/06/2026
 
-            CERRAR <id>
+                    ━━━━━━━━━━━━━━━
+                    📦 NUEVA REQUISICIÓN DE MATERIAL
+                    ━━━━━━━━━━━━━━━
 
-            Ejemplo:
-            CERRAR 7
+                    MATERIAL:
+                    Taladro de impacto Milwaukee
 
+                    CANTIDAD:
+                    1
 
-            🚨 PRIORIDADES
+                    UNIDAD:
+                    PZA
 
-            ALTA:
-            MEDIA:
-            BAJA:
+                    PRIORIDAD:
+                    ALTA
 
+                    AREA:
+                    Andén 2
 
-            📂 CATEGORIAS
+                    JUSTIFICACION:
+                    Sustituir herramienta dañada.
 
-            PROYECTO:
-            MATERIAL:
-            COMPRA:
-            RIESGO:
+                    ━━━━━━━━━━━━━━━
+                    🏗️ NUEVO PROYECTO
+                    ━━━━━━━━━━━━━━━
 
+                    PROYECTO:
+                    Instalación de iluminación LED en andenes
 
-            📝 EJEMPLOS
+                    AREA:
+                    Andén 2
 
-            ALTA:
-            Comprar 20 topes de andén
+                    PRIORIDAD:
+                    MEDIA
 
-            MATERIAL:
-            20 focos LED
+                    RESPONSABLE:
+                    Saul Romero
 
-            RIESGO:
-            Bakers dañados en área de sorteo
+                    TECNICOS:
+                    Saul Romero|Eliezer Romero
 
-            PROYECTO:
-            Dashboard limpieza
-            
-            ℹ️ SISTEMA
+                    FECHA:
+                    30/06/2026
 
-            Supervisor v1.1`;
+                    OBSERVACIONES:
+                    Realizar por etapas.
+
+                    ━━━━━━━━━━━━━━━
+                    🔒 CERRAR PENDIENTE
+                    ━━━━━━━━━━━━━━━
+
+                    CERRAR 42
+
+                    📸 EVIDENCIAS
+
+                    Después de registrar un pendiente, material o proyecto puedes enviar fotografías y quedarán ligadas automáticamente al último registro creado.`;
 
                 await message.reply(
                     ayuda
@@ -1105,18 +1131,107 @@ if (
             // =========================
             // MATERIAL
             // =========================
-
             if (
                 tipoRegistro === 'MATERIAL'
             ) {
 
+                const material =
+                    descripcion
+                        .split('CANTIDAD:')[0]
+                        .replace(/MATERIAL:/i, '')
+                        .trim();
+
+                const cantidad =
+                    descripcion.match(
+                        /CANTIDAD:\s*(.+)/i
+                    )?.[1]?.trim() || null;
+
+                const unidad =
+                    descripcion.match(
+                        /UNIDAD:\s*(.+)/i
+                    )?.[1]?.trim() || '';
+
+                const prioridad =
+                    descripcion.match(
+                        /PRIORIDAD:\s*(.+)/i
+                    )?.[1]?.trim() || 'MEDIA';
+
+                const area =
+                    descripcion.match(
+                        /AREA:\s*(.+)/i
+                    )?.[1]?.trim() || '';
+
+                const justificacion =
+                    descripcion.match(
+                        /JUSTIFICACION:\s*([\s\S]*)/i
+                    )?.[1]?.trim() || '';
+
+                const resultado =
+                    await pool.query(
+                        `
+                        INSERT INTO materiales_solicitados
+                        (
+                            solicitante,
+                            grupo,
+                            material,
+                            cantidad,
+                            unidad,
+                            prioridad,
+                            area,
+                            justificacion,
+                            creado_por
+                        )
+                        VALUES
+                        (
+                            $1,$2,$3,$4,$5,$6,$7,$8,$9
+                        )
+                        RETURNING id
+                        `,
+                        [
+                            nombreAutor,
+                            chat.name,
+                            material,
+                            cantidad || null,
+                            unidad,
+                            prioridad.toUpperCase(),
+                            area,
+                            justificacion,
+                            nombreAutor
+                        ]
+                    );
+
+                const idMaterial =
+                    resultado.rows[0].id;
+
                 console.log(
-                    '📦 Registrar material'
+                    `✅ Material ${idMaterial} guardado`
+                );
+
+
+                const claveMaterial =
+                    `${chat.name}_${message.author || ''}`;
+
+                ultimosMateriales[
+                    claveMaterial
+                ] = idMaterial;
+
+                console.log(
+                    '🧠 Último material:',
+                    claveMaterial,
+                    '=>',
+                    idMaterial
+                );
+
+
+                
+
+                await message.reply(
+                    `✅ Material registrado\n\nID: ${idMaterial}`
                 );
 
                 return;
-            }
 
+            }
             // =========================
             // PROYECTO
             // =========================
@@ -1340,6 +1455,7 @@ ${textoOriginal}
 
         let rutaEvidencia = '';
         let actividadId = null;
+        let materialId = null;
     
         
 
@@ -1611,6 +1727,25 @@ if (
 
 if (
     rutaEvidencia &&
+    !materialId
+) {
+
+    const claveMaterial =
+        `${chat.name}_${message.author || ''}`;
+
+    materialId =
+        ultimosMateriales[
+            claveMaterial
+        ];
+
+    console.log(
+        '🔎 Material recuperado:',
+        materialId
+    );
+}
+
+if (
+    rutaEvidencia &&
     pendienteId
 ) {
 
@@ -1642,7 +1777,44 @@ if (
     console.log(
         '✅ EVIDENCIA DE PENDIENTE RELACIONADA'
     );
+   
 }
+
+if (
+    rutaEvidencia &&
+    materialId
+) {
+
+    await pool.query(
+
+        `
+        INSERT INTO evidencias_materiales
+        (
+            material_id,
+            ruta,
+            nombre_archivo
+        )
+        VALUES
+        (
+            $1,
+            $2,
+            $3
+        )
+        `,
+        [
+            materialId,
+            rutaEvidencia,
+            path.basename(
+                rutaEvidencia
+            )
+        ]
+    );
+
+    console.log(
+        '✅ EVIDENCIA DE MATERIAL RELACIONADA'
+    );
+}
+
 
 if (
     rutaEvidencia &&
