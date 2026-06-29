@@ -4,7 +4,9 @@
   "description": "",
   "main": "bot.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "job:limpieza:relink": "node utils/relink-limpieza-evidencias.js",
+    "job:limpieza:relink:apply": "node utils/relink-limpieza-evidencias.js --apply"
   },
   "keywords": [],
   "author": "",
