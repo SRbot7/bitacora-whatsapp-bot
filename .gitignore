@@ -2,6 +2,7 @@ node_modules/
 .wwebjs_auth/
 bitacora.txt
 evidencias/
+evidencias_limpieza/
 bitacoras/
 
 backups/
