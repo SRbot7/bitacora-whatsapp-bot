@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Guia Operativa del Sistema SHP1</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      color: #1f2937;
+      background: #f5f7fb;
+      line-height: 1.5;
+    }
+    .wrap {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    .hero {
+      background: linear-gradient(135deg, #ffe600, #fff278);
+      border: 1px solid #d9c300;
+      border-radius: 18px;
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+    h1, h2 {
+      margin-top: 0;
+    }
+    .card {
+      background: #fff;
+      border: 1px solid #dbe2ea;
+      border-radius: 14px;
+      padding: 18px;
+      margin-bottom: 16px;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.04);
+    }
+    code {
+      background: #eef4ff;
+      padding: 2px 6px;
+      border-radius: 6px;
+    }
+    pre {
+      background: #111827;
+      color: #f9fafb;
+      padding: 14px;
+      border-radius: 10px;
+      overflow: auto;
+    }
+    ol {
+      padding-left: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <h1>Guia Operativa del Sistema SHP1</h1>
+      <p>Resumen operativo y tecnico del bot, API y dashboard de SHP1 Pachuca.</p>
+    </section>
+
+    <section class="card">
+      <h2>Ubicacion del proyecto</h2>
+      <p><code>/home/pc-ubuntu/servicios/bitacora-mtto</code></p>
+    </section>
+
+    <section class="card">
+      <h2>Procesos principales</h2>
+      <ol>
+        <li><code>bitacora-bot</code>: procesa WhatsApp.</li>
+        <li><code>bitacora-api</code>: expone dashboard y API.</li>
+      </ol>
+      <pre>pm2 status
+pm2 logs bitacora-bot --nostream --lines 100
+pm2 logs bitacora-api --nostream --lines 100</pre>
+    </section>
+
+    <section class="card">
+      <h2>Grupos aceptados</h2>
+      <ol>
+        <li><code>BITACORA-MTTO-SHP1</code> -> BITACORA</li>
+        <li><code>Mantenimiento SHP1</code> -> MANTENIMIENTO_FALLAS</li>
+        <li><code>MELI SVC PACHUCA - BATIA LIMPIEZA</code> -> LIMPIEZA</li>
+        <li><code>Asistencia SHP1 Pachuca</code> -> MANTENIMIENTO_ASISTENCIA</li>
+        <li><code>Ordenes preventivas semanales</code> -> PREVENTIVO</li>
+        <li><code>Centro Operativo SHP1</code> -> SUPERVISOR</li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2>Archivos principales</h2>
+      <ol>
+        <li><code>index.js</code>: router del bot.</li>
+        <li><code>api.js</code>: API y dashboard.</li>
+        <li><code>db.js</code>: conexion a PostgreSQL.</li>
+        <li><code>handlers/</code>: logica por grupo.</li>
+        <li><code>services/</code>: negocio y consultas.</li>
+        <li><code>dashboard/</code>: interfaz web.</li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2>Centro Operativo SHP1</h2>
+      <p>Comandos activos:</p>
+      <ol>
+        <li><code>AYUDA</code></li>
+        <li><code>REPORTE</code> / <code>RESUMEN</code></li>
+        <li><code>LISTAR</code>, <code>ABIERTOS</code>, <code>CERRADOS</code>, <code>COMPLETADOS</code></li>
+        <li><code>PREVENTIVOS</code>, <code>PREVENTIVOS CERRADOS</code></li>
+        <li><code>ALERTAS</code>, <code>ALERTAS ASISTENCIA</code></li>
+        <li><code>ASISTENCIA</code>, <code>ASISTENCIA HOY</code>, <code>EN TURNO</code></li>
+        <li><code>GUIA PENDIENTE</code>, <code>GUIA MATERIAL</code>, <code>GUIA PROYECTO</code></li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2>Asistencia y alertas</h2>
+      <ol>
+        <li>Ingenieria usa <code>Asistencia SHP1 Pachuca</code>.</li>
+        <li>Limpieza usa <code>MELI SVC PACHUCA - BATIA LIMPIEZA</code>.</li>
+        <li>Las alertas usan 60 minutos de tolerancia.</li>
+        <li>Las reglas de personal y descansos viven en <code>services/limpieza-personal.js</code>.</li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2>Dashboard</h2>
+      <ol>
+        <li>Pestanas: Principal, Bitacora, Supervisor, Limpieza y Asistencia.</li>
+        <li>Ya muestra alertas activas, asistencia y preventivos.</li>
+        <li>Las tarjetas principales navegan a vistas detalladas.</li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2>Tablas importantes</h2>
+      <ol>
+        <li><code>actividades_mtto</code></li>
+        <li><code>actividades_limpieza</code></li>
+        <li><code>evidencias_limpieza</code></li>
+        <li><code>asistencia_limpieza_diaria</code></li>
+        <li><code>asistencia_mantenimiento_eventos</code></li>
+        <li><code>pendientes_supervisor</code></li>
+        <li><code>preventivos_semanales</code></li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2>Logs</h2>
+      <p>El bot ya deja trazabilidad con <code>DB_PERSIST</code> para ver tabla, id, autor, grupo y mensajeId.</p>
+    </section>
+
+    <section class="card">
+      <h2>Respaldo actual</h2>
+      <p><code>backups/operaciones_20260629_233157.sql</code></p>
+    </section>
+  </div>
+</body>
+</html>

@@ -9,8 +9,8 @@
 <body>
     <header class="hero">
         <div class="hero-badge">SHP1 PACHUCA</div>
-        <h1>Centro de Operaciones y Bitacoras</h1>
-        <p>Vista unificada de Bitacora, Supervisor y Limpieza</p>
+        <h1>INGENIERIA DE PLANTA</h1>
+        <p>Vista unificada de Ingenieria de planta y Limpieza</p>
     </header>
 
     <section class="kpis" id="kpis">
@@ -37,13 +37,13 @@
     </section>
 
     <nav class="tabs">
-        <button class="tab active" data-tab="bitacora">Bitacora</button>
-        <button class="tab" data-tab="supervisor">Supervisor</button>
-        <button class="tab" data-tab="limpieza">Limpieza</button>
+        <button class="tab active" data-tab="principal">Principal</button>
+        <button class="tab" data-tab="supervisor">Ingenieria de planta</button>
+        <button class="tab" data-tab="limpieza">Limpieza y Asistencia</button>
     </nav>
 
     <section class="panel">
-        <div class="filters">
+        <div class="filters" id="filters-wrap">
             <input id="filter-search" type="text" placeholder="Buscar..." />
             <input id="filter-from" type="datetime-local" />
             <input id="filter-to" type="datetime-local" />
@@ -54,15 +54,37 @@
         </div>
 
         <div class="subtabs" id="subtabs-supervisor" hidden>
+            <button class="subtab" data-scope="bitacora">Bitacora</button>
             <button class="subtab active" data-scope="pendientes">Pendientes</button>
+            <button class="subtab" data-scope="alertas">Alertas</button>
+            <button class="subtab" data-scope="preventivos">Preventivos</button>
+            <button class="subtab" data-scope="completados">Completados</button>
             <button class="subtab" data-scope="materiales">Materiales</button>
             <button class="subtab" data-scope="proyectos">Proyectos</button>
+            <button class="subtab" data-scope="asistencia">Asistencia</button>
+        </div>
+
+        <div class="subtabs" id="subtabs-supervisor-asistencia" hidden>
+            <button class="subtab supervisor-asistencia-subtab active" data-supervisor-asistencia-scope="diaria">Diaria</button>
+            <button class="subtab supervisor-asistencia-subtab" data-supervisor-asistencia-scope="semanal">Semanal</button>
+            <button class="subtab supervisor-asistencia-subtab" data-supervisor-asistencia-scope="mensual">Mensual</button>
+        </div>
+
+        <div class="subtabs" id="subtabs-limpieza" hidden>
+            <button class="subtab active" data-limpieza-view="actividades">Actividades</button>
+            <button class="subtab" data-limpieza-view="asistencia">Asistencia</button>
+        </div>
+
+        <div class="subtabs" id="subtabs-asistencia" hidden>
+            <button class="asistencia-subtab active" data-asistencia-scope="diaria">Diaria</button>
+            <button class="asistencia-subtab" data-asistencia-scope="semanal">Semanal</button>
+            <button class="asistencia-subtab" data-asistencia-scope="marcador">Marcador</button>
         </div>
 
         <div id="status" class="status">Cargando...</div>
         <div id="listado" class="listado"></div>
 
-        <div class="pagination">
+        <div class="pagination" id="pagination-wrap">
             <button id="btn-prev" class="ghost">Anterior</button>
             <span id="page-info">-</span>
             <button id="btn-next" class="ghost">Siguiente</button>

@@ -1,15 +1,26 @@
+const moment = require('moment-timezone');
+const pool = require('../db');
+
 const {
     registrarPendiente,
     cerrarPendiente,
+    cerrarPendientePorCategoria,
     contarAbiertos,
     contarCerrados,
     listarPendientes,
+    listarPreventivosPendientes,
+    listarCompletadosSupervisor,
+    listarPreventivosCompletados,
     listarRiesgos,
     listarMaterialesSupervisor
 } = require('../services/pendientes');
 
 const { registrarMaterial }  = require('../services/materiales');
 const { registrarProyecto }  = require('../services/proyectos');
+const {
+    obtenerResumenOperativo,
+    construirMensajeResumenOperativo
+} = require('../services/reportes');
 const {
     guardarEvidenciaPendiente,
     guardarEvidenciaMaterial,
@@ -24,6 +35,14 @@ const {
     flujosSupervisor,
     claveMemoria
 } = require('../lib/memoria');
+const { logPersistencia } = require('../lib/persistence-log');
+const {
+    obtenerAlertasAsistenciaLimpieza,
+    obtenerEstadoTurnoLimpieza
+} = require('../services/alertas-asistencia');
+const {
+    autorPermitidoPorGrupo
+} = require('../services/asistencia-limpieza');
 
 
 // =========================
@@ -33,8 +52,38 @@ const {
 const COMANDOS = [
     'AYUDA', 'AYUDA PENDIENTES', 'AYUDA MATERIALES',
     'AYUDA INSUMOS', 'AYUDA PROYECTOS', 'AYUDA EVIDENCIAS',
-    'LISTAR', 'ABIERTOS', 'CERRADOS',
+    'AYUDA PREVENTIVOS', 'AYUDA ALERTAS', 'AYUDA HISTORICO',
+    'REPORTE', 'RESUMEN', 'REPORTE OPERATIVO', 'RESUMEN OPERATIVO',
+    'LISTAR', 'ABIERTOS', 'CERRADOS', 'COMPLETADOS', 'HISTORICO', 'LISTAR CERRADOS',
+    'PREVENTIVOS', 'LISTAR PREVENTIVOS', 'PREVENTIVOS CERRADOS', 'LISTAR PREVENTIVOS CERRADOS', 'HISTORICO PREVENTIVOS',
+    'ALERTAS', 'ALERTAS ASISTENCIA',
+    'ASISTENCIA', 'ASISTENCIA HOY', 'EN TURNO',
     'RIESGOS', 'MATERIALES', 'PROYECTOS'
+];
+
+const GRUPO_ASISTENCIA_INGENIERIA = 'Asistencia SHP1 Pachuca';
+const EQUIPO_INGENIERIA = [
+    {
+        key: 'saul',
+        nombre: 'Saul Romero Romero',
+        puesto: 'Electromecanico',
+        turno: '1er turno',
+        aliases: ['saul romero romero', 'saul romero', 'saul']
+    },
+    {
+        key: 'eliezer',
+        nombre: 'Eliezer Romero Romero',
+        puesto: 'Multitecnico',
+        turno: '2do turno',
+        aliases: ['eliezer romero romero', 'eliezer romero', 'eliezer']
+    },
+    {
+        key: 'flavio',
+        nombre: 'Flavio Cruz Santiago',
+        puesto: 'Multitecnico',
+        turno: '3er turno',
+        aliases: ['flavio cruz santiago', 'flavio cruz', 'flavio']
+    }
 ];
 
 const COMANDOS_GUIA_PENDIENTE = [
@@ -58,6 +107,15 @@ const COMANDOS_GUIA_PROYECTO = [
 ];
 
 const COMANDOS_CANCELAR = ['CANCELAR', 'SALIR', 'CANCELAR GUIA'];
+
+function normalizarComando(texto = '') {
+    return texto
+        .toUpperCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
 
 function iniciarFlujoPendiente(clave) {
     flujosSupervisor[clave] = {
@@ -163,6 +221,134 @@ function convertirFechaDDMMYYYYaSQL(valor) {
 
     const [, d, m, y] = match;
     return `${y}-${m}-${d}`;
+}
+
+function resolverIngenieriaPersona(autor = '') {
+    const autorN = normalizarComando(autor).toLowerCase();
+    if (!autorN) {
+        return null;
+    }
+
+    for (const persona of EQUIPO_INGENIERIA) {
+        const matched = persona.aliases.some((alias) => {
+            const aliasN = normalizarComando(alias).toLowerCase();
+            return autorN.includes(aliasN) || aliasN.includes(autorN);
+        });
+
+        if (matched) {
+            return persona;
+        }
+    }
+
+    return null;
+}
+
+async function obtenerAsistenciaIngenieriaHoy() {
+    const fechaHoyMxRes = await pool.query(`SELECT (NOW() AT TIME ZONE 'America/Mexico_City')::date AS fecha_hoy`);
+    const fechaHoy = fechaHoyMxRes.rows[0]?.fecha_hoy;
+    const mapa = new Map();
+
+    const acumular = (row) => {
+        const persona = resolverIngenieriaPersona(row.autor);
+        if (!persona) {
+            return;
+        }
+
+        if (!autorPermitidoPorGrupo(row.autor, GRUPO_ASISTENCIA_INGENIERIA)) {
+            return;
+        }
+
+        const previo = mapa.get(persona.key) || {
+            totalReportes: 0,
+            totalEvidencias: 0,
+            primerReporte: null,
+            ultimoReporte: null,
+            autores: []
+        };
+
+        previo.totalReportes += Number(row.total_reportes || 0);
+        previo.totalEvidencias += Number(row.total_evidencias || 0);
+        if (!previo.primerReporte || (row.primer_reporte && new Date(row.primer_reporte) < new Date(previo.primerReporte))) {
+            previo.primerReporte = row.primer_reporte || previo.primerReporte;
+        }
+        if (!previo.ultimoReporte || (row.ultimo_reporte && new Date(row.ultimo_reporte) > new Date(previo.ultimoReporte))) {
+            previo.ultimoReporte = row.ultimo_reporte || previo.ultimoReporte;
+        }
+        if (!previo.autores.includes(row.autor)) {
+            previo.autores.push(row.autor);
+        }
+
+        mapa.set(persona.key, previo);
+    };
+
+    try {
+        const eventosRes = await pool.query(
+            `
+            SELECT
+                autor,
+                COUNT(*)::int AS total_reportes,
+                0::int AS total_evidencias,
+                MIN(created_at) AS primer_reporte,
+                MAX(created_at) AS ultimo_reporte
+            FROM asistencia_mantenimiento_eventos
+            WHERE fecha = $1
+              AND grupo ILIKE $2
+            GROUP BY autor
+            ORDER BY autor ASC
+            `,
+            [fechaHoy, `%${GRUPO_ASISTENCIA_INGENIERIA}%`]
+        );
+
+        for (const row of eventosRes.rows) {
+            acumular(row);
+        }
+    } catch (error) {
+        if (!error || error.code !== '42P01') {
+            throw error;
+        }
+    }
+
+    const legacyRes = await pool.query(
+        `
+        SELECT
+            autor,
+            total_reportes,
+            total_evidencias,
+            primer_reporte,
+            ultimo_reporte
+        FROM asistencia_limpieza_diaria
+        WHERE fecha = $1
+          AND grupo ILIKE $2
+        ORDER BY autor ASC
+        `,
+        [fechaHoy, `%${GRUPO_ASISTENCIA_INGENIERIA}%`]
+    );
+
+    for (const row of legacyRes.rows) {
+        acumular(row);
+    }
+
+    return EQUIPO_INGENIERIA.map((persona) => {
+        const agg = mapa.get(persona.key) || {
+            totalReportes: 0,
+            totalEvidencias: 0,
+            primerReporte: null,
+            ultimoReporte: null,
+            autores: []
+        };
+
+        return {
+            persona: persona.nombre,
+            puesto: persona.puesto,
+            turno: persona.turno,
+            estado: agg.totalReportes > 0 || agg.totalEvidencias > 0 ? 'A' : 'F',
+            totalReportes: agg.totalReportes,
+            totalEvidencias: agg.totalEvidencias,
+            primerReporte: agg.primerReporte,
+            ultimoReporte: agg.ultimoReporte,
+            autores: agg.autores
+        };
+    });
 }
 
 function procesarPasoPendiente({ flujo, respuesta }) {
@@ -348,7 +534,7 @@ function procesarPasoProyecto({ flujo, respuesta, nombreAutor }) {
 async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fecha }) {
 
     const descripcion = (textoOriginal || '').trim();
-    const desc        = descripcion.toUpperCase().trim();
+    const desc        = normalizarComando(descripcion);
     const clave       = claveMemoria(chat.name, message.author);
     const flujoActivo = flujosSupervisor[clave];
 
@@ -357,6 +543,22 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
             delete flujosSupervisor[clave];
             await message.reply('🛑 Captura guiada cancelada.');
         }
+        return;
+    }
+
+    if (!message.hasMedia && ['REPORTE', 'RESUMEN', 'REPORTE OPERATIVO', 'RESUMEN OPERATIVO'].includes(desc)) {
+        const fechaMx = moment().tz('America/Mexico_City');
+        const inicioDia = fechaMx.clone().startOf('day').format('YYYY-MM-DD HH:mm:ss');
+        const finDia = fechaMx.clone().endOf('day').format('YYYY-MM-DD HH:mm:ss');
+
+        const resumen = await obtenerResumenOperativo({ inicioDia, finDia });
+        const mensajeResumen = construirMensajeResumenOperativo({
+            momento: fechaMx,
+            resumen,
+            tipo: 'MANUAL'
+        });
+
+        await message.reply(mensajeResumen);
         return;
     }
 
@@ -424,6 +626,13 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
         });
 
         ultimosPendientes[clave] = idPendiente;
+        logPersistencia({
+            tabla: 'pendientes_supervisor',
+            id: idPendiente,
+            autor: nombreAutor,
+            grupo: chat.name,
+            mensajeId: message.id._serialized
+        });
 
         await message.reply(
             `✅ Pendiente registrado con captura guiada\n\n` +
@@ -467,6 +676,13 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
         });
 
         ultimosMateriales[clave] = idMaterial;
+        logPersistencia({
+            tabla: 'materiales_supervisor',
+            id: idMaterial,
+            autor: nombreAutor,
+            grupo: chat.name,
+            mensajeId: message.id._serialized
+        });
 
         await message.reply(
             `✅ Material/Insumo registrado con captura guiada\n\n` +
@@ -512,6 +728,13 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
         });
 
         ultimosProyectos[clave] = idProyecto;
+        logPersistencia({
+            tabla: 'proyectos_supervisor',
+            id: idProyecto,
+            autor: nombreAutor,
+            grupo: chat.name,
+            mensajeId: message.id._serialized
+        });
 
         await message.reply(
             `✅ Proyecto registrado con captura guiada\n\n` +
@@ -592,15 +815,21 @@ AYUDA PENDIENTES — Comandos de pendientes.
 AYUDA MATERIALES / AYUDA INSUMOS — Comandos de materiales.
 AYUDA PROYECTOS — Comandos de proyectos.
 AYUDA EVIDENCIAS — Información sobre fotografías.
+AYUDA PREVENTIVOS — Comandos de preventivos abiertos/cerrados.
+AYUDA ALERTAS — Comandos de alertas de asistencia.
+AYUDA HISTORICO — Consultas de completados e historial.
 GUIA PENDIENTE — Registro guiado paso a paso.
 GUIA MATERIAL o GUIA INSUMO — Registro guiado paso a paso.
 GUIA PROYECTO — Registro guiado paso a paso.
+REPORTE o RESUMEN — Envía resumen operativo inmediato.
 CANCELAR o SALIR — Cancela cualquier guía activa.
 
 ━━━━━━━━━━━━━━━
 CONSULTAS
 ━━━━━━━━━━━━━━━
-LISTAR | ABIERTOS | CERRADOS
+LISTAR | ABIERTOS | CERRADOS | COMPLETADOS
+PREVENTIVOS | PREVENTIVOS CERRADOS
+ALERTAS | ALERTAS ASISTENCIA
 MATERIALES | PROYECTOS | RIESGOS`);
         return;
     }
@@ -697,13 +926,78 @@ Puedes enviar una o varias fotografías.`);
         return;
     }
 
+    if (desc === 'AYUDA PREVENTIVOS') {
+        await message.reply(`🛠️ PREVENTIVOS PENDIENTES
+
+LISTAR PREVENTIVOS — Muestra solo preventivos abiertos.
+CERRAR PREVENTIVO <ID> — Cierra un preventivo abierto por ID.
+LISTAR PREVENTIVOS CERRADOS — Muestra preventivos completados recientes.
+HISTORICO PREVENTIVOS — Alias para preventivos cerrados.
+
+Ejemplo:
+CERRAR PREVENTIVO 48
+
+Los preventivos se manejan aparte de los pendientes de actividades.`);
+        return;
+    }
+
+    if (desc === 'AYUDA ALERTAS') {
+        await message.reply(`🚨 ALERTAS DE ASISTENCIA
+
+ALERTAS — Muestra alertas activas de asistencia de limpieza.
+ALERTAS ASISTENCIA — Alias del comando anterior.
+
+Estas alertas se generan cuando el personal en turno no manda evidencia dentro de la tolerancia configurada.`);
+        return;
+    }
+
+    if (desc === 'ASISTENCIA' || desc === 'ASISTENCIA HOY' || desc === 'EN TURNO') {
+        const [ingenieria, limpieza] = await Promise.all([
+            obtenerAsistenciaIngenieriaHoy(),
+            obtenerEstadoTurnoLimpieza(pool)
+        ]);
+
+        const ingenieriaAsistio = ingenieria.filter((item) => item.estado === 'A').map((item) => item.persona);
+        const ingenieriaFalto = ingenieria.filter((item) => item.estado !== 'A').map((item) => item.persona);
+
+        const respuesta = [
+            '👥 ASISTENCIA Y EN TURNO',
+            '',
+            'INGENIERÍA DE PLANTA',
+            `Con asistencia: ${ingenieriaAsistio.length ? ingenieriaAsistio.join(', ') : 'Nadie'}`,
+            `Sin asistencia: ${ingenieriaFalto.length ? ingenieriaFalto.join(', ') : 'Nadie'}`,
+            '',
+            'LIMPIEZA | TURNO ACTUAL',
+            limpieza.sinCobertura
+                ? 'Sin cobertura programada en esta hora.'
+                : `En turno con evidencia: ${limpieza.enTurno.length ? limpieza.enTurno.map((item) => item.persona).join(', ') : 'Nadie'}`,
+            `En turno sin registro: ${limpieza.sinRegistro.length ? limpieza.sinRegistro.map((item) => item.persona).join(', ') : 'Nadie'}`,
+            `Descanso: ${limpieza.descanso.length ? limpieza.descanso.map((item) => item.persona).join(', ') : 'Nadie'}`
+        ].join('\n');
+
+        await message.reply(respuesta);
+        return;
+    }
+
+    if (desc === 'AYUDA HISTORICO') {
+        await message.reply(`🗂️ HISTÓRICO Y COMPLETADOS
+
+COMPLETADOS — Muestra los últimos registros cerrados/completados.
+HISTORICO — Alias de completados.
+LISTAR CERRADOS — Alias de completados.
+PREVENTIVOS CERRADOS — Muestra preventivos cerrados recientes.
+HISTORICO PREVENTIVOS — Alias de preventivos cerrados.`);
+        return;
+    }
+
     // =========================
     // ABIERTOS
     // =========================
 
     if (desc === 'ABIERTOS') {
         const total = await contarAbiertos();
-        await message.reply(`📋 Pendientes abiertos: ${total}`);
+        const preventivos = await listarPreventivosPendientes();
+        await message.reply(`📋 Pendientes abiertos: ${total}\n🛠️ Preventivos abiertos: ${preventivos.length}`);
         return;
     }
 
@@ -714,6 +1008,27 @@ Puedes enviar una o varias fotografías.`);
     if (desc === 'CERRADOS') {
         const total = await contarCerrados();
         await message.reply(`✅ Pendientes cerrados: ${total}`);
+        return;
+    }
+
+    if (desc === 'COMPLETADOS' || desc === 'HISTORICO' || desc === 'LISTAR CERRADOS') {
+        const rows = await listarCompletadosSupervisor(15);
+        let respuesta = '🗂️ HISTORICO COMPLETADO\n\n';
+
+        rows.forEach((r) => {
+            const icono =
+                r.prioridad === 'ALTA' ? '🔴' :
+                r.prioridad === 'MEDIA' ? '🟡' : '🟢';
+
+            respuesta +=
+                `[${r.id}] ${icono} ${r.prioridad} | ${r.categoria || 'GENERAL'}\n` +
+                `${r.descripcion}\n` +
+                `${r.fecha_cierre ? `Cierre: ${moment(r.fecha_cierre).format('DD/MM/YYYY HH:mm')}\n` : ''}\n`;
+        });
+
+        if (rows.length === 0) respuesta = '✅ No hay registros completados';
+
+        await message.reply(respuesta);
         return;
     }
 
@@ -756,6 +1071,27 @@ Puedes enviar una o varias fotografías.`);
     }
 
     // =========================
+    // CERRAR PREVENTIVO
+    // =========================
+
+    const cerrarPreventivoMatch = descripcion.match(/^(DONE|CERRAR)\s+PREVENTIVO\s+(\d+)$/i);
+
+    if (cerrarPreventivoMatch) {
+        const idPendiente = cerrarPreventivoMatch[2];
+        const cerrado = await cerrarPendientePorCategoria(idPendiente, 'PREVENTIVO');
+
+        if (cerrado) {
+            await message.reply(`✅ Preventivo ${idPendiente} completado`);
+            console.log(`✅ Preventivo ${idPendiente} completado`);
+        } else {
+            await message.reply(`⚠️ Preventivo ${idPendiente} no encontrado o ya cerrado`);
+            console.log(`⚠️ Preventivo ${idPendiente} no encontrado o ya cerrado`);
+        }
+
+        return;
+    }
+
+    // =========================
     // CERRAR PENDIENTE
     // =========================
 
@@ -782,6 +1118,7 @@ Puedes enviar una o varias fotografías.`);
     if (desc === 'LISTAR') {
 
         const rows = await listarPendientes();
+        const preventivos = await listarPreventivosPendientes();
         let respuesta = '📋 PENDIENTES ABIERTOS\n\n';
 
         rows.forEach(p => {
@@ -796,8 +1133,86 @@ Puedes enviar una o varias fotografías.`);
 
         if (rows.length === 0) respuesta = '✅ No hay pendientes abiertos';
 
+        if (preventivos.length > 0) {
+            respuesta += '\n🛠️ PREVENTIVOS ABIERTOS\n\n';
+
+            preventivos.forEach(p => {
+                const icono =
+                    p.prioridad === 'ALTA'  ? '🔴' :
+                    p.prioridad === 'MEDIA' ? '🟡' : '🟢';
+
+                respuesta +=
+                    `[${p.id}] ${icono} ${p.prioridad} | ${p.categoria}\n` +
+                    `${p.descripcion}\n\n`;
+            });
+        }
+
         await message.reply(respuesta);
         console.log('📤 Lista enviada a WhatsApp');
+        return;
+    }
+
+    if (desc === 'PREVENTIVOS' || desc === 'LISTAR PREVENTIVOS') {
+        const rows = await listarPreventivosPendientes();
+        let respuesta = '🛠️ PREVENTIVOS ABIERTOS\n\n';
+
+        rows.forEach(p => {
+            const icono =
+                p.prioridad === 'ALTA'  ? '🔴' :
+                p.prioridad === 'MEDIA' ? '🟡' : '🟢';
+
+            respuesta +=
+                `[${p.id}] ${icono} ${p.prioridad} | ${p.area || 'SHP1'}\n` +
+                `${p.descripcion}\n` +
+                `${p.observaciones ? `\n${p.observaciones}` : ''}\n\n`;
+        });
+
+        if (rows.length === 0) respuesta = '✅ No hay preventivos abiertos';
+
+        await message.reply(respuesta);
+        console.log('📤 Preventivos enviados a WhatsApp');
+        return;
+    }
+
+    if (desc === 'PREVENTIVOS CERRADOS' || desc === 'LISTAR PREVENTIVOS CERRADOS' || desc === 'HISTORICO PREVENTIVOS') {
+        const rows = await listarPreventivosCompletados(15);
+        let respuesta = '🛠️ PREVENTIVOS CERRADOS\n\n';
+
+        rows.forEach((p) => {
+            const icono =
+                p.prioridad === 'ALTA' ? '🔴' :
+                p.prioridad === 'MEDIA' ? '🟡' : '🟢';
+
+            respuesta +=
+                `[${p.id}] ${icono} ${p.prioridad} | ${p.area || 'SHP1'}\n` +
+                `${p.descripcion}\n` +
+                `${p.fecha_cierre ? `Cierre: ${moment(p.fecha_cierre).format('DD/MM/YYYY HH:mm')}\n` : ''}` +
+                `${p.observaciones ? `${p.observaciones}\n` : ''}\n`;
+        });
+
+        if (rows.length === 0) respuesta = '✅ No hay preventivos cerrados';
+
+        await message.reply(respuesta);
+        return;
+    }
+
+    if (desc === 'ALERTAS' || desc === 'ALERTAS ASISTENCIA') {
+        const data = await obtenerAlertasAsistenciaLimpieza(pool);
+        let respuesta = '🚨 ALERTAS DE ASISTENCIA\n\n';
+
+        data.items.forEach((item) => {
+            respuesta +=
+                `${item.persona}\n` +
+                `Turno: ${item.turno}\n` +
+                `Atraso: ${item.minutosAtraso} min\n` +
+                `Grupo: ${item.grupo}\n\n`;
+        });
+
+        if (data.items.length === 0) {
+            respuesta = '✅ No hay alertas activas de asistencia';
+        }
+
+        await message.reply(respuesta);
         return;
     }
 
@@ -836,7 +1251,13 @@ Puedes enviar una o varias fotografías.`);
 
         ultimosPendientes[clave] = idPendiente;
         console.log('🧠 Último pendiente:', clave, '=>', idPendiente);
-        console.log(`✅ Pendiente ${idPendiente} guardado`);
+        logPersistencia({
+            tabla: 'pendientes_supervisor',
+            id: idPendiente,
+            autor: nombreAutor,
+            grupo: chat.name,
+            mensajeId: message.id._serialized
+        });
 
         await message.reply(`✅ Pendiente registrado\n\nID: ${idPendiente}`);
 
@@ -879,7 +1300,13 @@ Puedes enviar una o varias fotografías.`);
 
         ultimosMateriales[clave] = idMaterial;
         console.log('🧠 Último material:', clave, '=>', idMaterial);
-        console.log(`✅ Material ${idMaterial} guardado`);
+        logPersistencia({
+            tabla: 'materiales_supervisor',
+            id: idMaterial,
+            autor: nombreAutor,
+            grupo: chat.name,
+            mensajeId: message.id._serialized
+        });
 
         await message.reply(`✅ Material registrado\n\nID: ${idMaterial}`);
 
@@ -934,6 +1361,13 @@ Puedes enviar una o varias fotografías.`);
 
         ultimosProyectos[clave] = idProyecto;
         console.log('🧠 Último proyecto:', clave, '=>', idProyecto);
+        logPersistencia({
+            tabla: 'proyectos_supervisor',
+            id: idProyecto,
+            autor: nombreAutor,
+            grupo: chat.name,
+            mensajeId: message.id._serialized
+        });
 
         await message.reply(`✅ Proyecto registrado\n\nID: ${idProyecto}`);
 

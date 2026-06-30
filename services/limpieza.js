@@ -75,8 +75,31 @@ async function obtenerUltimaActividadLimpiezaPorAutor({ autor, grupo, fecha, max
 }
 
 
+async function obtenerUltimaActividadLimpiezaSinReportePorAutor({ autor, grupo, fecha, maxMinutos }) {
+    const fechaRef = fecha.format('YYYY-MM-DD HH:mm:ss');
+
+    const resultado = await pool.query(
+        `
+        SELECT id
+        FROM actividades_limpieza
+        WHERE autor = $1
+          AND grupo = $2
+          AND actividad = '[SIN REPORTE] Imagen enviada sin texto.'
+          AND fecha <= $3
+          AND fecha >= ($3::timestamp - make_interval(mins => $4::int))
+        ORDER BY fecha DESC, id DESC
+        LIMIT 1
+        `,
+        [autor, grupo, fechaRef, maxMinutos]
+    );
+
+    return resultado.rows[0]?.id || null;
+}
+
+
 module.exports = {
     guardarActividadLimpieza,
     guardarEvidenciaLimpieza,
-    obtenerUltimaActividadLimpiezaPorAutor
+    obtenerUltimaActividadLimpiezaPorAutor,
+    obtenerUltimaActividadLimpiezaSinReportePorAutor
 };

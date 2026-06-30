@@ -11,6 +11,7 @@ const {
     flujosBitacora,
     claveMemoria
 } = require('../lib/memoria');
+const { logPersistencia } = require('../lib/persistence-log');
 
 const COMANDOS_GUIA_BITACORA = [
     'GUIA BITACORA',
@@ -96,6 +97,26 @@ function procesarPasoBitacora({ flujo, respuesta, nombreAutor }) {
 
     flujo.paso += 1;
     return { ok: true, finalizado: false };
+}
+
+function construirMensajeAgradecimientoBitacora({ tecnico, idActividad }) {
+    const nombre = (tecnico || 'equipo').toString().trim();
+    const nombreCorto = nombre.split(' ')[0] || 'equipo';
+    const variantes = [
+        `✅ Gracias ${nombreCorto}, bitacora recibida y registrada.`,
+        `✅ Excelente ${nombreCorto}, ya quedo registrada tu bitacora.`,
+        `✅ Listo ${nombreCorto}, se guardo correctamente tu reporte de bitacora.`,
+        `✅ Gracias por el reporte ${nombreCorto}, bitacora procesada con exito.`
+    ];
+
+    const indice = Math.floor(Math.random() * variantes.length);
+    const base = variantes[indice];
+
+    if (idActividad) {
+        return `${base}\nID: ${idActividad}`;
+    }
+
+    return base;
 }
 
 
@@ -223,6 +244,13 @@ Comandos utiles:
 
         if (actividadIdGuiada) {
             ultimasActividades[clave] = actividadIdGuiada;
+            logPersistencia({
+                tabla: 'actividades_mtto',
+                id: actividadIdGuiada,
+                autor: nombreAutor,
+                grupo: chat.name,
+                mensajeId: message.id._serialized
+            });
         }
 
         await message.reply(
@@ -230,6 +258,13 @@ Comandos utiles:
             `Turno: ${datos.turno}\n` +
             `Area: ${datos.area}\n` +
             `Tecnico: ${datos.tecnico}`
+        );
+
+        await message.reply(
+            construirMensajeAgradecimientoBitacora({
+                tecnico: datos.tecnico,
+                idActividad: actividadIdGuiada
+            })
         );
 
         return;
@@ -310,7 +345,13 @@ Comandos utiles:
         if (actividadId) {
             ultimasActividades[clave] = actividadId;
             console.log('🧠 Última actividad:', clave, '=>', actividadId);
-            console.log('\n✅ ACTIVIDAD GUARDADA | ID:', actividadId);
+            logPersistencia({
+                tabla: 'actividades_mtto',
+                id: actividadId,
+                autor: nombreAutor,
+                grupo: chat.name,
+                mensajeId: message.id._serialized
+            });
         }
     }
 
@@ -339,6 +380,15 @@ Comandos utiles:
         });
 
         console.log('✅ EVIDENCIA RELACIONADA');
+    }
+
+    if (textoOriginal.trim() && actividadId) {
+        await message.reply(
+            construirMensajeAgradecimientoBitacora({
+                tecnico,
+                idActividad: actividadId
+            })
+        );
     }
 }
 

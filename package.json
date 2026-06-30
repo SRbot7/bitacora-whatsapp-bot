@@ -23,6 +23,7 @@
     "moment-timezone": "^0.6.2",
     "pg": "^8.21.0",
     "qrcode-terminal": "^0.12.0",
+    "tesseract.js": "^7.0.0",
     "whatsapp-web.js": "^1.34.7"
   }
 }
