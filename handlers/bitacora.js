@@ -6,7 +6,97 @@ const {
     guardarActividad,
     relacionarEvidencia
 } = require('../lib/bitacora-storage');
-const { ultimasActividades, claveMemoria } = require('../lib/memoria');
+const {
+    ultimasActividades,
+    flujosBitacora,
+    claveMemoria
+} = require('../lib/memoria');
+
+const COMANDOS_GUIA_BITACORA = [
+    'GUIA BITACORA',
+    'GUIA',
+    'NUEVA BITACORA',
+    'INICIAR BITACORA'
+];
+
+const COMANDOS_CANCELAR = ['CANCELAR', 'SALIR', 'CANCELAR BITACORA'];
+const COMANDOS_AYUDA_BITACORA = ['AYUDA', 'AYUDA BITACORA'];
+
+function esFormatoBitacoraValido(texto = '') {
+    const limpio = texto.trim();
+    return /area\s*:/i.test(limpio) && /pendientes\s*:/i.test(limpio);
+}
+
+function iniciarFlujoBitacora({ clave, nombreAutor }) {
+    flujosBitacora[clave] = {
+        paso: 0,
+        data: {
+            turno: '',
+            area: '',
+            actividad: '',
+            pendientes: '',
+            tecnico: nombreAutor || ''
+        }
+    };
+}
+
+function siguientePreguntaBitacora(paso) {
+    const preguntas = [
+        '1/5 Turno (ejemplo: 1, 2 o 3):',
+        '2/5 Area:',
+        '3/5 Actividad realizada:',
+        '4/5 Pendientes (escribe OMITIR si no hay):',
+        '5/5 Tecnico responsable (escribe OMITIR para usar tu nombre):'
+    ];
+
+    return preguntas[paso] || '';
+}
+
+function procesarPasoBitacora({ flujo, respuesta, nombreAutor }) {
+    const valor = (respuesta || '').trim();
+
+    if (flujo.paso === 0) {
+        if (!/^\d+$/.test(valor)) {
+            return { ok: false, msg: 'Turno invalido. Escribe solo numero (1, 2 o 3).' };
+        }
+        flujo.data.turno = valor;
+    }
+
+    if (flujo.paso === 1) {
+        if (!valor) {
+            return { ok: false, msg: 'Area no puede ir vacia.' };
+        }
+        flujo.data.area = valor;
+    }
+
+    if (flujo.paso === 2) {
+        if (!valor) {
+            return { ok: false, msg: 'Actividad no puede ir vacia.' };
+        }
+        flujo.data.actividad = valor;
+    }
+
+    if (flujo.paso === 3) {
+        flujo.data.pendientes = /^OMITIR$/i.test(valor) || !valor
+            ? 'Sin pendientes'
+            : valor;
+    }
+
+    if (flujo.paso === 4) {
+        flujo.data.tecnico = /^OMITIR$/i.test(valor) || !valor
+            ? (nombreAutor || 'Sin nombre')
+            : valor;
+
+        return {
+            ok: true,
+            finalizado: true,
+            data: flujo.data
+        };
+    }
+
+    flujo.paso += 1;
+    return { ok: true, finalizado: false };
+}
 
 
 // =========================
@@ -15,9 +105,141 @@ const { ultimasActividades, claveMemoria } = require('../lib/memoria');
 
 async function manejarBitacora({ message, chat, textoOriginal, nombreAutor, fecha }) {
 
+    if (message.fromMe) {
+        return;
+    }
+
     // Blindaje: este handler solo debe persistir datos del grupo BITACORA.
     if (chat.name !== 'BITACORA-MTTO-SHP1') {
         console.log('⛔ Bloqueado en BITACORA: grupo no permitido para actividades_mtto ->', chat.name);
+        return;
+    }
+
+    const descripcion = (textoOriginal || '').trim();
+    const descripcionUpper = descripcion.toUpperCase();
+    const clave = claveMemoria(chat.name, message.author);
+    const flujoActivo = flujosBitacora[clave];
+
+    if (!message.hasMedia && COMANDOS_AYUDA_BITACORA.includes(descripcionUpper)) {
+        await message.reply(`📘 AYUDA BITACORA SHP1
+
+Tienes 2 formas de registrar:
+
+1) MODO GUIADO (recomendado)
+Comando: GUIA BITACORA
+El bot te pedira cada campo y valida datos.
+
+2) MODO FORMATO LIBRE
+Envia este formato:
+
+BITACORA TURNO: 2
+AREA:
+Anden 3
+ACTIVIDAD O REPORTE AQUI
+PENDIENTES:
+Sin pendientes
+TECNICO:
+Nombre del tecnico
+
+Comandos utiles:
+- GUIA BITACORA: inicia captura guiada
+- CANCELAR o SALIR: cancela captura guiada
+- AYUDA: muestra este menu`);
+        return;
+    }
+
+    if (COMANDOS_CANCELAR.includes(descripcionUpper)) {
+        if (flujoActivo) {
+            delete flujosBitacora[clave];
+            await message.reply('🛑 Captura guiada de Bitacora cancelada.');
+        }
+        return;
+    }
+
+    if (!message.hasMedia && COMANDOS_GUIA_BITACORA.includes(descripcionUpper)) {
+        iniciarFlujoBitacora({ clave, nombreAutor });
+        await message.reply(
+            '🧭 Modo guiado Bitacora activado.\n' +
+            'Responde un campo por mensaje.\n' +
+            'Puedes escribir CANCELAR en cualquier momento.\n\n' +
+            siguientePreguntaBitacora(0)
+        );
+        return;
+    }
+
+    if (flujoActivo && !message.hasMedia) {
+        const resultadoPaso = procesarPasoBitacora({
+            flujo: flujoActivo,
+            respuesta: descripcion,
+            nombreAutor
+        });
+
+        if (!resultadoPaso.ok) {
+            await message.reply(`⚠️ ${resultadoPaso.msg}`);
+            return;
+        }
+
+        if (!resultadoPaso.finalizado) {
+            await message.reply(siguientePreguntaBitacora(flujoActivo.paso));
+            return;
+        }
+
+        const datos = resultadoPaso.data;
+        delete flujosBitacora[clave];
+
+        const textoSintetico = [
+            `BITACORA TURNO: ${datos.turno}`,
+            `AREA: ${datos.area}`,
+            `${datos.actividad}`,
+            'PENDIENTES:',
+            `${datos.pendientes}`,
+            `TECNICO: ${datos.tecnico}`
+        ].join('\n');
+
+        guardarTextoBitacora({
+            fecha,
+            chatName: chat.name,
+            nombreAutor,
+            turno: datos.turno,
+            area: datos.area,
+            actividad: datos.actividad,
+            pendientes: datos.pendientes,
+            tecnico: datos.tecnico,
+            textoOriginal: textoSintetico
+        });
+
+        const actividadIdGuiada = await guardarActividad(pool, {
+            fecha,
+            tecnico: datos.tecnico,
+            area: datos.area,
+            actividad: datos.actividad,
+            pendientes: datos.pendientes,
+            turno: datos.turno,
+            mensajeId: message.id._serialized,
+            grupo: chat.name,
+            autorNumero: message.author || '',
+            tipoMensaje: message.type
+        });
+
+        if (actividadIdGuiada) {
+            ultimasActividades[clave] = actividadIdGuiada;
+        }
+
+        await message.reply(
+            `✅ Bitacora registrada con captura guiada.\n\n` +
+            `Turno: ${datos.turno}\n` +
+            `Area: ${datos.area}\n` +
+            `Tecnico: ${datos.tecnico}`
+        );
+
+        return;
+    }
+
+    if (!message.hasMedia && descripcion && !esFormatoBitacoraValido(descripcion)) {
+        await message.reply(
+            '⚠️ Formato no reconocido para Bitacora.\n' +
+            'Recomendado: escribe GUIA BITACORA para captura paso a paso.'
+        );
         return;
     }
 
@@ -86,7 +308,6 @@ async function manejarBitacora({ message, chat, textoOriginal, nombreAutor, fech
         });
 
         if (actividadId) {
-            const clave = claveMemoria(chat.name, message.author);
             ultimasActividades[clave] = actividadId;
             console.log('🧠 Última actividad:', clave, '=>', actividadId);
             console.log('\n✅ ACTIVIDAD GUARDADA | ID:', actividadId);
@@ -100,7 +321,6 @@ async function manejarBitacora({ message, chat, textoOriginal, nombreAutor, fech
     // la última actividad del usuario para relacionarla.
 
     if (!actividadId && rutaEvidencia) {
-        const clave = claveMemoria(chat.name, message.author);
         actividadId = ultimasActividades[clave];
         console.log('🖎 Actividad recuperada:', actividadId);
     }
