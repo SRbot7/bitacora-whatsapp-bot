@@ -85,10 +85,6 @@ async function manejarMantenimiento({ message, chat, textoOriginal, nombreAutor,
             grupo: chat.name,
             mensajeId: message.id._serialized
         });
-
-        await message.reply(
-            `✅ Falla de mantenimiento registrada\n\nID: ${idFalla}\nArea: ${area}\nEquipo: ${equipo}\nPrioridad: ${prioridad}`
-        );
         return;
     }
 
@@ -118,10 +114,6 @@ async function manejarMantenimiento({ message, chat, textoOriginal, nombreAutor,
         grupo: chat.name,
         mensajeId: message.id._serialized
     });
-
-    await message.reply(
-        `✅ Asistencia de mantenimiento registrada\n\nID: ${idAsistencia}\nEvento: ${tipoEvento}\nUbicacion: ${ubicacion}\nTurno: ${turno}`
-    );
 }
 
 module.exports = { manejarMantenimiento };

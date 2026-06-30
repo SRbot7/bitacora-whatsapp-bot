@@ -53,6 +53,7 @@ const COMANDOS = [
     'AYUDA', 'AYUDA PENDIENTES', 'AYUDA MATERIALES',
     'AYUDA INSUMOS', 'AYUDA PROYECTOS', 'AYUDA EVIDENCIAS',
     'AYUDA PREVENTIVOS', 'AYUDA ALERTAS', 'AYUDA HISTORICO',
+    'AYUDA GUIADA', 'GUIA AYUDA', 'AYUDA RAPIDA',
     'REPORTE', 'RESUMEN', 'REPORTE OPERATIVO', 'RESUMEN OPERATIVO',
     'LISTAR', 'ABIERTOS', 'CERRADOS', 'COMPLETADOS', 'HISTORICO', 'LISTAR CERRADOS',
     'PREVENTIVOS', 'LISTAR PREVENTIVOS', 'PREVENTIVOS CERRADOS', 'LISTAR PREVENTIVOS CERRADOS', 'HISTORICO PREVENTIVOS',
@@ -107,6 +108,7 @@ const COMANDOS_GUIA_PROYECTO = [
 ];
 
 const COMANDOS_CANCELAR = ['CANCELAR', 'SALIR', 'CANCELAR GUIA'];
+const COMANDOS_GUIA_AYUDA = ['AYUDA GUIADA', 'GUIA AYUDA', 'AYUDA RAPIDA'];
 
 function normalizarComando(texto = '') {
     return texto
@@ -115,6 +117,137 @@ function normalizarComando(texto = '') {
         .replace(/[\u0300-\u036f]/g, '')
         .replace(/\s+/g, ' ')
         .trim();
+}
+
+function limpiarTextoPlano(texto = '') {
+    return texto
+        .toString()
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function extraerLineaOCRDesdeObservaciones(observaciones = '') {
+    const match = (observaciones || '').match(/L[ií]nea OCR:\s*([^\n]+)/i);
+    return match?.[1] ? limpiarTextoPlano(match[1]) : '';
+}
+
+function formatearLineaOCRPreventivo(linea = '') {
+    if (!linea) {
+        return '';
+    }
+
+    const base = linea
+        .toString()
+        .replace(/[—–−]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .replace(/\bMITO\b/gi, 'MANTTO')
+        .trim();
+
+    if (!base) {
+        return '';
+    }
+
+    const numeros = base.match(/\b\d{6,}\b/g) || [];
+    if (numeros.length > 0) {
+        const resto = limpiarTextoPlano(
+            base
+                .replace(/\bSHP1\b/gi, ' ')
+                .replace(/\bZMPS\b/gi, ' ')
+                .replace(/\b\d{6,}\b/g, ' ')
+                .replace(/[|]/g, ' ')
+                .replace(/\s+/g, ' ')
+        );
+
+        return `${numeros.join(' - ')}${resto ? ` - ${resto}` : ''}`;
+    }
+
+    if (base.includes('|')) {
+        const partes = base
+            .split('|')
+            .map((p) => p.trim())
+            .filter(Boolean);
+
+        return partes.join(' | ');
+    }
+
+    if (base.includes('-')) {
+        const partes = base
+            .split('-')
+            .map((p) => p.trim())
+            .filter(Boolean);
+
+        if (partes.length > 1) {
+            return partes.join(' | ');
+        }
+    }
+
+    return base;
+}
+
+function formatearLineaPreventivo(p) {
+    const icono =
+        p.prioridad === 'ALTA' ? '🔴' :
+        p.prioridad === 'MEDIA' ? '🟡' : '🟢';
+
+    const area = p.area || 'SHP1';
+    const descripcion = normalizarDescripcionPreventivo(p.descripcion || '[Sin descripción]');
+    const lineaOCRRaw = extraerLineaOCRDesdeObservaciones(p.observaciones);
+    const lineaOCR = formatearLineaOCRPreventivo(lineaOCRRaw);
+    return `[${p.id}] ${icono} ${p.prioridad} | ${area} | ${descripcion}${lineaOCR ? `\n${lineaOCR}` : ''}`;
+}
+
+function normalizarDescripcionPreventivo(descripcion = '') {
+    const limpia = limpiarTextoPlano(descripcion || '[Sin descripción]');
+
+    // Evita repeticiones visuales como "[CORTINAS] CORTINAS".
+    const match = limpia.match(/^\[([^\]]+)\]\s+(.+)$/);
+    if (!match) {
+        return limpia;
+    }
+
+    const etiqueta = (match[1] || '').trim();
+    const resto = (match[2] || '').trim();
+    const restoSinEtiqueta = resto.replace(new RegExp(`^${etiqueta}\b\s*`, 'i'), '').trim();
+
+    if (etiqueta && resto.toUpperCase() === etiqueta.toUpperCase()) {
+        return `[${etiqueta}]`;
+    }
+
+    if (etiqueta && restoSinEtiqueta && restoSinEtiqueta.length < resto.length) {
+        return `[${etiqueta}] ${restoSinEtiqueta}`;
+    }
+
+    return limpia;
+}
+
+function categoriaPreventivoDesdeDescripcion(descripcion = '') {
+    const d = (descripcion || '').toUpperCase();
+    if (d.includes('[CORTINAS]') || d.includes('CORTINA')) return 'CORTINAS';
+    if (d.includes('[RAMPAS]') || d.includes('RAMPA')) return 'RAMPAS';
+    if (d.includes('[BANOS]') || d.includes('BAÑ') || d.includes('BANO')) return 'BANOS';
+    if (d.includes('[CARRITOS]') || d.includes('CARRITO')) return 'CARRITOS';
+    return 'OTROS';
+}
+
+function ordenarPreventivosPorCategoria(rows = []) {
+    const ordenCategoria = {
+        CORTINAS: 1,
+        RAMPAS: 2,
+        BANOS: 3,
+        CARRITOS: 4,
+        OTROS: 5
+    };
+
+    return [...rows].sort((a, b) => {
+        const ca = categoriaPreventivoDesdeDescripcion(a.descripcion);
+        const cb = categoriaPreventivoDesdeDescripcion(b.descripcion);
+
+        if (ca !== cb) {
+            return (ordenCategoria[ca] || 99) - (ordenCategoria[cb] || 99);
+        }
+
+        return Number(a.id) - Number(b.id);
+    });
 }
 
 function iniciarFlujoPendiente(clave) {
@@ -166,6 +299,81 @@ function iniciarFlujoProyecto(clave, nombreAutor) {
     };
 }
 
+function iniciarFlujoAyudaGuiada(clave) {
+    flujosSupervisor[clave] = {
+        tipo: 'AYUDA_GUIADA',
+        paso: 0,
+        data: {}
+    };
+}
+
+function mensajeMenuAyudaGuiada() {
+    return [
+        '🧭 AYUDA GUIADA (rápida)',
+        '',
+        'Elige una opción y responde con número:',
+        '1) Pendientes',
+        '2) Materiales/Insumos',
+        '3) Proyectos',
+        '4) Evidencias/Fotos',
+        '5) Consultas',
+        '',
+        'Escribe SALIR para cerrar esta ayuda.'
+    ].join('\n');
+}
+
+function resolverAyudaGuiada(respuesta = '') {
+    const r = normalizarComando(respuesta);
+
+    if (!r || r === 'MENU' || r === 'MENÚ' || r === 'INICIO') {
+        return mensajeMenuAyudaGuiada();
+    }
+
+    if (r === '1' || r === 'PENDIENTE' || r === 'PENDIENTES') {
+        return [
+            '🚧 Pendientes',
+            'Usa GUIA PENDIENTE para captura paso a paso.',
+            'Al finalizar, envía fotos y se ligan al último pendiente.',
+            'Cierre rápido: CERRAR <ID>'
+        ].join('\n');
+    }
+
+    if (r === '2' || r === 'MATERIAL' || r === 'MATERIALES' || r === 'INSUMO' || r === 'INSUMOS') {
+        return [
+            '📦 Materiales/Insumos',
+            'Usa GUIA MATERIAL o GUIA INSUMO.',
+            'Al finalizar, envía fotos y se ligan al último material.'
+        ].join('\n');
+    }
+
+    if (r === '3' || r === 'PROYECTO' || r === 'PROYECTOS') {
+        return [
+            '🏗️ Proyectos',
+            'Usa GUIA PROYECTO para captura guiada.',
+            'Al finalizar, envía fotos y se ligan al último proyecto.'
+        ].join('\n');
+    }
+
+    if (r === '4' || r === 'EVIDENCIA' || r === 'EVIDENCIAS' || r === 'FOTO' || r === 'FOTOS') {
+        return [
+            '📸 Evidencias',
+            'Envía una o varias imágenes después de registrar.',
+            'El sistema las liga al último registro tuyo (pendiente/material/proyecto).'
+        ].join('\n');
+    }
+
+    if (r === '5' || r === 'CONSULTA' || r === 'CONSULTAS') {
+        return [
+            '📋 Consultas útiles',
+            'LISTAR, ABIERTOS, CERRADOS, COMPLETADOS',
+            'MATERIALES, PROYECTOS, RIESGOS',
+            'PREVENTIVOS, PREVENTIVOS CERRADOS'
+        ].join('\n');
+    }
+
+    return 'No entendí la opción. Responde 1, 2, 3, 4 o 5.';
+}
+
 function siguientePreguntaPendiente(paso) {
     const preguntas = [
         '1/7 Describe el pendiente:',
@@ -174,7 +382,7 @@ function siguientePreguntaPendiente(paso) {
         '4/7 Prioridad (ALTA/MEDIA/BAJA):',
         '5/7 Turno:',
         '6/7 Tecnicos (ejemplo: Juan|Pedro):',
-        '7/7 Fecha programada DD/MM/AAAA (o escribe OMITIR):'
+        '7/7 Fecha programada DD/MM/AAAA (o escribe OMITIR). Al finalizar puedes enviar fotos de evidencia:'
     ];
 
     return preguntas[paso] || '';
@@ -187,7 +395,7 @@ function siguientePreguntaMaterial(paso) {
         '3/6 Unidad (PZA, M, KG, L, etc.):',
         '4/6 Prioridad (ALTA/MEDIA/BAJA):',
         '5/6 Area:',
-        '6/6 Justificacion:'
+        '6/6 Justificacion. Al finalizar puedes enviar fotos de evidencia:'
     ];
 
     return preguntas[paso] || '';
@@ -203,7 +411,7 @@ function siguientePreguntaProyecto(paso) {
         '6/9 Tecnicos (ejemplo: Juan|Pedro):',
         '7/9 Turno:',
         '8/9 Fecha programada DD/MM/AAAA (o escribe OMITIR):',
-        '9/9 Costo estimado (numero, o escribe OMITIR):'
+        '9/9 Costo estimado (numero, o escribe OMITIR). Al finalizar puedes enviar fotos de evidencia:'
     ];
 
     return preguntas[paso] || '';
@@ -541,7 +749,11 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
     if (COMANDOS_CANCELAR.includes(desc)) {
         if (flujoActivo) {
             delete flujosSupervisor[clave];
-            await message.reply('🛑 Captura guiada cancelada.');
+            if (flujoActivo.tipo === 'AYUDA_GUIADA') {
+                await message.reply('🛑 Ayuda guiada cerrada.');
+            } else {
+                await message.reply('🛑 Captura guiada cancelada.');
+            }
         }
         return;
     }
@@ -562,12 +774,27 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
         return;
     }
 
+    if (!message.hasMedia && COMANDOS_GUIA_AYUDA.includes(desc)) {
+        iniciarFlujoAyudaGuiada(clave);
+        await message.reply(mensajeMenuAyudaGuiada());
+        return;
+    }
+
+    if (flujoActivo && !message.hasMedia && flujoActivo.tipo === 'AYUDA_GUIADA') {
+        const respuesta = resolverAyudaGuiada(descripcion);
+        await message.reply(
+            `${respuesta}\n\n¿Otra duda? Responde 1-5.\nEscribe SALIR para cerrar.`
+        );
+        return;
+    }
+
     if (!message.hasMedia && COMANDOS_GUIA_PENDIENTE.includes(desc)) {
         iniciarFlujoPendiente(clave);
         await message.reply(
             '🧭 Modo guiado de Pendiente activado.\n' +
             'Responde un campo por mensaje.\n' +
-            'Puedes escribir CANCELAR en cualquier momento.\n\n' +
+            'Puedes escribir CANCELAR en cualquier momento.\n' +
+            'Al terminar, envia una o varias fotos y se ligaran al pendiente.\n\n' +
             siguientePreguntaPendiente(0)
         );
         return;
@@ -578,7 +805,8 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
         await message.reply(
             '🧭 Modo guiado de Material/Insumo activado.\n' +
             'Responde un campo por mensaje.\n' +
-            'Puedes escribir CANCELAR en cualquier momento.\n\n' +
+            'Puedes escribir CANCELAR en cualquier momento.\n' +
+            'Al terminar, envia una o varias fotos y se ligaran al material/insumo.\n\n' +
             siguientePreguntaMaterial(0)
         );
         return;
@@ -589,7 +817,8 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
         await message.reply(
             '🧭 Modo guiado de Proyecto activado.\n' +
             'Responde un campo por mensaje.\n' +
-            'Puedes escribir CANCELAR en cualquier momento.\n\n' +
+            'Puedes escribir CANCELAR en cualquier momento.\n' +
+            'Al terminar, envia una o varias fotos y se ligaran al proyecto.\n\n' +
             siguientePreguntaProyecto(0)
         );
         return;
@@ -638,7 +867,8 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
             `✅ Pendiente registrado con captura guiada\n\n` +
             `ID: ${idPendiente}\n` +
             `Area: ${datos.area}\n` +
-            `Prioridad: ${datos.prioridad}`
+            `Prioridad: ${datos.prioridad}\n\n` +
+            `📸 Puedes enviar una o varias fotos para ligar evidencia a este pendiente.`
         );
 
         return;
@@ -688,7 +918,8 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
             `✅ Material/Insumo registrado con captura guiada\n\n` +
             `ID: ${idMaterial}\n` +
             `Material: ${datos.material}\n` +
-            `Prioridad: ${datos.prioridad}`
+            `Prioridad: ${datos.prioridad}\n\n` +
+            `📸 Puedes enviar una o varias fotos para ligar evidencia a este material/insumo.`
         );
 
         return;
@@ -740,7 +971,8 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
             `✅ Proyecto registrado con captura guiada\n\n` +
             `ID: ${idProyecto}\n` +
             `Nombre: ${datos.nombre}\n` +
-            `Prioridad: ${datos.prioridad}`
+            `Prioridad: ${datos.prioridad}\n\n` +
+            `📸 Puedes enviar una o varias fotos para ligar evidencia a este proyecto.`
         );
 
         return;
@@ -808,29 +1040,13 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
     if (desc === 'AYUDA') {
         await message.reply(`🤖 CENTRO OPERATIVO SHP1
 
-📋 MENÚ DE AYUDA
+    AYUDA RÁPIDA
+    • AYUDA GUIADA (recomendada)
+    • GUIA PENDIENTE | GUIA MATERIAL | GUIA PROYECTO
+    • LISTAR | ABIERTOS | CERRADOS | COMPLETADOS
+    • MATERIALES | PROYECTOS | RIESGOS
 
-AYUDA — Muestra este menú.
-AYUDA PENDIENTES — Comandos de pendientes.
-AYUDA MATERIALES / AYUDA INSUMOS — Comandos de materiales.
-AYUDA PROYECTOS — Comandos de proyectos.
-AYUDA EVIDENCIAS — Información sobre fotografías.
-AYUDA PREVENTIVOS — Comandos de preventivos abiertos/cerrados.
-AYUDA ALERTAS — Comandos de alertas de asistencia.
-AYUDA HISTORICO — Consultas de completados e historial.
-GUIA PENDIENTE — Registro guiado paso a paso.
-GUIA MATERIAL o GUIA INSUMO — Registro guiado paso a paso.
-GUIA PROYECTO — Registro guiado paso a paso.
-REPORTE o RESUMEN — Envía resumen operativo inmediato.
-CANCELAR o SALIR — Cancela cualquier guía activa.
-
-━━━━━━━━━━━━━━━
-CONSULTAS
-━━━━━━━━━━━━━━━
-LISTAR | ABIERTOS | CERRADOS | COMPLETADOS
-PREVENTIVOS | PREVENTIVOS CERRADOS
-ALERTAS | ALERTAS ASISTENCIA
-MATERIALES | PROYECTOS | RIESGOS`);
+    Escribe AYUDA GUIADA para resolver dudas paso a paso.`);
         return;
     }
 
@@ -855,6 +1071,9 @@ TECNICOS:
 Saul Romero|Eliezer Romero
 FECHA:
 30/06/2026
+
+FOTOS:
+Después de registrar, envía una o varias imágenes para ligar evidencia al pendiente.
 
 ━━━━━━━━━━━━━━━
 LISTAR — Muestra pendientes abiertos.
@@ -882,6 +1101,9 @@ AREA:
 Andén 2
 JUSTIFICACION:
 Sustituir herramienta dañada.
+
+FOTOS:
+Después de registrar, envía una o varias imágenes para ligar evidencia al material/insumo.
 
 CANCELAR — Cancela guía activa`);
         return;
@@ -913,6 +1135,9 @@ FECHA:
 COSTO:
 15000
 
+FOTOS:
+Después de registrar, envía una o varias imágenes para ligar evidencia al proyecto.
+
 CANCELAR — Cancela guía activa`);
         return;
     }
@@ -922,7 +1147,9 @@ CANCELAR — Cancela guía activa`);
 
 Las fotografías enviadas después de registrar un pendiente, material o proyecto quedarán ligadas automáticamente al último registro creado por el mismo usuario.
 
-Puedes enviar una o varias fotografías.`);
+Puedes enviar una o varias fotografías.
+
+Aplica tanto para modo guiado como para formato libre.`);
         return;
     }
 
@@ -1118,10 +1345,12 @@ HISTORICO PREVENTIVOS — Alias de preventivos cerrados.`);
     if (desc === 'LISTAR') {
 
         const rows = await listarPendientes();
-        const preventivos = await listarPreventivosPendientes();
+        const pendientesGenerales = rows.filter((p) => (p.categoria || '').toUpperCase() !== 'PREVENTIVO');
+        const preventivosRaw = await listarPreventivosPendientes();
+        const preventivos = ordenarPreventivosPorCategoria(preventivosRaw);
         let respuesta = '📋 PENDIENTES ABIERTOS\n\n';
 
-        rows.forEach(p => {
+        pendientesGenerales.forEach(p => {
             const icono =
                 p.prioridad === 'ALTA'  ? '🔴' :
                 p.prioridad === 'MEDIA' ? '🟡' : '🟢';
@@ -1131,19 +1360,13 @@ HISTORICO PREVENTIVOS — Alias de preventivos cerrados.`);
                 `${p.descripcion}\n\n`;
         });
 
-        if (rows.length === 0) respuesta = '✅ No hay pendientes abiertos';
+        if (pendientesGenerales.length === 0) respuesta = '✅ No hay pendientes generales abiertos';
 
         if (preventivos.length > 0) {
             respuesta += '\n🛠️ PREVENTIVOS ABIERTOS\n\n';
 
             preventivos.forEach(p => {
-                const icono =
-                    p.prioridad === 'ALTA'  ? '🔴' :
-                    p.prioridad === 'MEDIA' ? '🟡' : '🟢';
-
-                respuesta +=
-                    `[${p.id}] ${icono} ${p.prioridad} | ${p.categoria}\n` +
-                    `${p.descripcion}\n\n`;
+                respuesta += `${formatearLineaPreventivo(p)}\n\n`;
             });
         }
 
@@ -1153,18 +1376,12 @@ HISTORICO PREVENTIVOS — Alias de preventivos cerrados.`);
     }
 
     if (desc === 'PREVENTIVOS' || desc === 'LISTAR PREVENTIVOS') {
-        const rows = await listarPreventivosPendientes();
+        const rowsRaw = await listarPreventivosPendientes();
+        const rows = ordenarPreventivosPorCategoria(rowsRaw);
         let respuesta = '🛠️ PREVENTIVOS ABIERTOS\n\n';
 
         rows.forEach(p => {
-            const icono =
-                p.prioridad === 'ALTA'  ? '🔴' :
-                p.prioridad === 'MEDIA' ? '🟡' : '🟢';
-
-            respuesta +=
-                `[${p.id}] ${icono} ${p.prioridad} | ${p.area || 'SHP1'}\n` +
-                `${p.descripcion}\n` +
-                `${p.observaciones ? `\n${p.observaciones}` : ''}\n\n`;
+            respuesta += `${formatearLineaPreventivo(p)}\n\n`;
         });
 
         if (rows.length === 0) respuesta = '✅ No hay preventivos abiertos';
@@ -1179,15 +1396,11 @@ HISTORICO PREVENTIVOS — Alias de preventivos cerrados.`);
         let respuesta = '🛠️ PREVENTIVOS CERRADOS\n\n';
 
         rows.forEach((p) => {
-            const icono =
-                p.prioridad === 'ALTA' ? '🔴' :
-                p.prioridad === 'MEDIA' ? '🟡' : '🟢';
-
-            respuesta +=
-                `[${p.id}] ${icono} ${p.prioridad} | ${p.area || 'SHP1'}\n` +
-                `${p.descripcion}\n` +
-                `${p.fecha_cierre ? `Cierre: ${moment(p.fecha_cierre).format('DD/MM/YYYY HH:mm')}\n` : ''}` +
-                `${p.observaciones ? `${p.observaciones}\n` : ''}\n`;
+            respuesta += `${formatearLineaPreventivo(p)}\n`;
+            if (p.fecha_cierre) {
+                respuesta += `Cierre: ${moment(p.fecha_cierre).format('DD/MM/YYYY HH:mm')}\n`;
+            }
+            respuesta += '\n';
         });
 
         if (rows.length === 0) respuesta = '✅ No hay preventivos cerrados';
@@ -1259,7 +1472,7 @@ HISTORICO PREVENTIVOS — Alias de preventivos cerrados.`);
             mensajeId: message.id._serialized
         });
 
-        await message.reply(`✅ Pendiente registrado\n\nID: ${idPendiente}`);
+        await message.reply(`✅ Pendiente registrado\n\nID: ${idPendiente}\n\n📸 Puedes enviar una o varias fotos para ligar evidencia a este pendiente.`);
 
         if (rutaEvidencia) {
             await guardarEvidenciaPendiente({ pendienteId: idPendiente, rutaEvidencia });
@@ -1308,7 +1521,7 @@ HISTORICO PREVENTIVOS — Alias de preventivos cerrados.`);
             mensajeId: message.id._serialized
         });
 
-        await message.reply(`✅ Material registrado\n\nID: ${idMaterial}`);
+        await message.reply(`✅ Material registrado\n\nID: ${idMaterial}\n\n📸 Puedes enviar una o varias fotos para ligar evidencia a este material/insumo.`);
 
         if (rutaEvidencia) {
             await guardarEvidenciaMaterial({ materialId: idMaterial, rutaEvidencia });
@@ -1369,7 +1582,7 @@ HISTORICO PREVENTIVOS — Alias de preventivos cerrados.`);
             mensajeId: message.id._serialized
         });
 
-        await message.reply(`✅ Proyecto registrado\n\nID: ${idProyecto}`);
+        await message.reply(`✅ Proyecto registrado\n\nID: ${idProyecto}\n\n📸 Puedes enviar una o varias fotos para ligar evidencia a este proyecto.`);
 
         if (rutaEvidencia) {
             await guardarEvidenciaProyecto({ proyectoId: idProyecto, rutaEvidencia });

@@ -124,7 +124,15 @@ function construirDescripcionItem(lineaOriginal = '') {
         'OTRO';
 
     const matchDetalle = linea.match(/(?:MANTTO|MTTO)\s+(.+)$/i);
-    const detalle = matchDetalle?.[1]?.trim() || linea;
+    const detalleDetectado = matchDetalle?.[1]?.trim() || '';
+    const detallePorCategoria =
+        categoria === 'CORTINAS' ? 'CORTINAS' :
+        categoria === 'RAMPAS' ? 'RAMPAS' :
+        categoria === 'BANOS' ? 'BANOS' :
+        categoria === 'CARRITOS' ? 'CARRITOS' :
+        'ACTIVIDAD';
+
+    const detalle = detalleDetectado || detallePorCategoria;
 
     return {
         categoria,
