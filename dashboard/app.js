@@ -99,7 +99,7 @@ function formatDiaCabecera(value) {
 function toPublicImageUrl(ruta) {
     if (!ruta) return '';
 
-    if (ruta.startsWith('/evidencias/') || ruta.startsWith('/evidencias_limpieza/')) {
+    if (ruta.startsWith('/evidencias_bitacora/') || ruta.startsWith('/evidencias/') || ruta.startsWith('/evidencias_limpieza/')) {
         return ruta;
     }
 
@@ -108,6 +108,11 @@ function toPublicImageUrl(ruta) {
     const idxLimp = clean.indexOf('/evidencias_limpieza/');
     if (idxLimp >= 0) {
         return clean.slice(idxLimp);
+    }
+
+    const idxBitNuevo = clean.indexOf('/evidencias_bitacora/');
+    if (idxBitNuevo >= 0) {
+        return clean.slice(idxBitNuevo);
     }
 
     const idxBit = clean.indexOf('/evidencias/');

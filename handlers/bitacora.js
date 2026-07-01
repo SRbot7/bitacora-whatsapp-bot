@@ -132,7 +132,7 @@ async function manejarBitacora({ message, chat, textoOriginal, nombreAutor, fech
 
     // Blindaje: este handler solo debe persistir datos del grupo BITACORA.
     if (chat.name !== 'BITACORA-MTTO-SHP1') {
-        console.log('⛔ Bloqueado en BITACORA: grupo no permitido para actividades_mtto ->', chat.name);
+        console.log('⛔ Bloqueado en BITACORA: grupo no permitido para bitacora ->', chat.name);
         return;
     }
 
@@ -245,7 +245,7 @@ Comandos utiles:
         if (actividadIdGuiada) {
             ultimasActividades[clave] = actividadIdGuiada;
             logPersistencia({
-                tabla: 'actividades_mtto',
+                tabla: 'bitacora',
                 id: actividadIdGuiada,
                 autor: nombreAutor,
                 grupo: chat.name,
@@ -346,7 +346,7 @@ Comandos utiles:
             ultimasActividades[clave] = actividadId;
             console.log('🧠 Última actividad:', clave, '=>', actividadId);
             logPersistencia({
-                tabla: 'actividades_mtto',
+                tabla: 'bitacora',
                 id: actividadId,
                 autor: nombreAutor,
                 grupo: chat.name,

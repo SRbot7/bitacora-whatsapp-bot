@@ -131,7 +131,7 @@ tecnico,
 area,
 grupo,
 tipo_mensaje
-FROM actividades_mtto
+FROM bitacora
 ORDER BY id DESC
 LIMIT 1;
 "

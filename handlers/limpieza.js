@@ -163,6 +163,7 @@ async function manejarLimpieza({ message, chat, textoOriginal, nombreAutor, fech
         fecha,
         autor: nombreAutor,
         grupo: chat.name,
+        fuenteRegistro: 'AUTOMATICO',
         reportesIncremento: huboReporte ? 1 : 0,
         evidenciasIncremento: huboEvidencia ? 1 : 0
     });

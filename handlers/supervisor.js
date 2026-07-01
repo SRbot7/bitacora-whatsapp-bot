@@ -41,8 +41,15 @@ const {
     obtenerEstadoTurnoLimpieza
 } = require('../services/alertas-asistencia');
 const {
+    registrarAsistenciaLimpieza,
     autorPermitidoPorGrupo
 } = require('../services/asistencia-limpieza');
+const {
+    registrarAsistenciaMantenimiento
+} = require('../services/asistencia-mantenimiento');
+const {
+    MARCADOR_PERSONAL
+} = require('../services/limpieza-personal');
 
 
 // =========================
@@ -58,17 +65,19 @@ const COMANDOS = [
     'LISTAR', 'ABIERTOS', 'CERRADOS', 'COMPLETADOS', 'HISTORICO', 'LISTAR CERRADOS',
     'PREVENTIVOS', 'LISTAR PREVENTIVOS', 'PREVENTIVOS CERRADOS', 'LISTAR PREVENTIVOS CERRADOS', 'HISTORICO PREVENTIVOS',
     'ALERTAS', 'ALERTAS ASISTENCIA',
-    'ASISTENCIA', 'ASISTENCIA HOY', 'EN TURNO',
+    'ASISTENCIA', 'ASISTENCIA HOY', 'EN TURNO', 'EN SITIO',
     'RIESGOS', 'MATERIALES', 'PROYECTOS'
 ];
 
 const GRUPO_ASISTENCIA_INGENIERIA = 'Asistencia SHP1 Pachuca';
+const GRUPO_LIMPIEZA_OPERATIVA = 'MELI SVC PACHUCA - BATIA LIMPIEZA';
 const EQUIPO_INGENIERIA = [
     {
         key: 'saul',
         nombre: 'Saul Romero Romero',
         puesto: 'Electromecanico',
         turno: '1er turno',
+        horario: '07:00-15:00',
         aliases: ['saul romero romero', 'saul romero', 'saul']
     },
     {
@@ -76,6 +85,7 @@ const EQUIPO_INGENIERIA = [
         nombre: 'Eliezer Romero Romero',
         puesto: 'Multitecnico',
         turno: '2do turno',
+        horario: '14:00-22:00',
         aliases: ['eliezer romero romero', 'eliezer romero', 'eliezer']
     },
     {
@@ -83,6 +93,7 @@ const EQUIPO_INGENIERIA = [
         nombre: 'Flavio Cruz Santiago',
         puesto: 'Multitecnico',
         turno: '3er turno',
+        horario: '22:00-06:00',
         aliases: ['flavio cruz santiago', 'flavio cruz', 'flavio']
     }
 ];
@@ -734,6 +745,175 @@ function procesarPasoProyecto({ flujo, respuesta, nombreAutor }) {
     return { ok: true, finalizado: false };
 }
 
+function construirMensajeIdManual(prefijo = 'manual') {
+    const base = moment().tz('America/Mexico_City').format('YYYYMMDDHHmmssSSS');
+    const random = Math.random().toString(36).slice(2, 10);
+    return `${prefijo}_${base}_${random}`;
+}
+
+function iniciarFlujoAsistenciaGuiada(clave, nombreAutor) {
+    flujosSupervisor[clave] = {
+        tipo: 'ASISTENCIA_GUIADA',
+        paso: 0,
+        data: {
+            area: '',
+            persona: '',
+            solicitante: nombreAutor || 'Sin nombre'
+        }
+    };
+}
+
+function opcionesPersonalAsistencia(area = '') {
+    if (area === 'LIMPIEZA') {
+        return MARCADOR_PERSONAL.map((p) => p.nombre);
+    }
+
+    return EQUIPO_INGENIERIA.map((p) => p.nombre);
+}
+
+function resolverFichaPersonalAsistencia(area = '', nombre = '') {
+    const nombreN = normalizarComando(nombre);
+    if (!nombreN) {
+        return null;
+    }
+
+    if (area === 'LIMPIEZA') {
+        const persona = MARCADOR_PERSONAL.find((p) => normalizarComando(p.nombre) === nombreN);
+        if (!persona) {
+            return null;
+        }
+
+        const turnoTxt = persona.turno || 'Sin turno';
+        const horario = turnoTxt.match(/(\d{2}:\d{2}-\d{2}:\d{2})/)?.[1] || 'Sin horario';
+        return {
+            nombre: persona.nombre,
+            turno: turnoTxt,
+            horario,
+            turnoRegistro: turnoTxt
+        };
+    }
+
+    const persona = EQUIPO_INGENIERIA.find((p) => normalizarComando(p.nombre) === nombreN);
+    if (!persona) {
+        return null;
+    }
+
+    const turno = persona.turno || 'Sin turno';
+    const horario = persona.horario || 'Sin horario';
+    return {
+        nombre: persona.nombre,
+        turno,
+        horario,
+        turnoRegistro: `${turno} ${horario}`.trim()
+    };
+}
+
+function mensajeMenuAsistenciaArea() {
+    return [
+        '👥 ASISTENCIA GUIADA',
+        '',
+        '¿Qué área deseas registrar?',
+        '1) LIMPIEZA',
+        '2) MTTO',
+        '',
+        'Responde con 1 o 2 (o escribe LIMPIEZA / MTTO).',
+        'Escribe CANCELAR para salir.'
+    ].join('\n');
+}
+
+function mensajeMenuAsistenciaPersonas(area = '') {
+    const opciones = opcionesPersonalAsistencia(area);
+    const titulo = area === 'LIMPIEZA' ? '🧹 PERSONAL LIMPIEZA' : '🛠️ PERSONAL MANTENIMIENTO';
+    const lineas = [titulo, ''];
+
+    opciones.forEach((nombre, idx) => {
+        const ficha = resolverFichaPersonalAsistencia(area, nombre);
+        if (ficha) {
+            lineas.push(`${idx + 1}) ${nombre} (${ficha.turno}, ${ficha.horario})`);
+            return;
+        }
+
+        lineas.push(`${idx + 1}) ${nombre}`);
+    });
+
+    lineas.push('');
+    lineas.push('Responde con el número o escribe el nombre exacto.');
+    lineas.push('Escribe CANCELAR para salir.');
+
+    return lineas.join('\n');
+}
+
+function resolverAreaAsistencia(valor = '') {
+    const n = normalizarComando(valor);
+    if (n === '1' || n === 'LIMPIEZA') return 'LIMPIEZA';
+    if (n === '2' || n === 'MTTO' || n === 'MANTENIMIENTO') return 'MTTO';
+    return '';
+}
+
+function resolverPersonaAsistencia(area = '', valor = '') {
+    const opciones = opcionesPersonalAsistencia(area);
+    const n = normalizarComando(valor);
+    const num = Number.parseInt(n, 10);
+
+    if (Number.isInteger(num) && num >= 1 && num <= opciones.length) {
+        return opciones[num - 1];
+    }
+
+    const encontrada = opciones.find((nombre) => normalizarComando(nombre) === n);
+    return encontrada || '';
+}
+
+function parsearAsistenciaMantenimientoManual(cuerpo = '', nombreAutor = '') {
+    const partes = (cuerpo || '')
+        .split('|')
+        .map((p) => p.trim())
+        .filter(Boolean);
+
+    let autor = '';
+    let tipoEvento = 'ENTRADA';
+    let turno = 'Sin turno';
+    let ubicacion = 'Centro Operativo SHP1';
+
+    for (const parte of partes) {
+        const upper = normalizarComando(parte);
+
+        if (upper === 'ENTRADA' || upper === 'SALIDA') {
+            tipoEvento = upper;
+            continue;
+        }
+
+        const turnoMatch = parte.match(/^TURNO\s*:?\s*(.+)$/i);
+        if (turnoMatch?.[1]) {
+            turno = turnoMatch[1].trim();
+            continue;
+        }
+
+        const ubicMatch = parte.match(/^(?:UBICACION|UBICACIÓN|LUGAR|LOCALIZACION|LOCALIZACIÓN)\s*:?\s*(.+)$/i);
+        if (ubicMatch?.[1]) {
+            ubicacion = ubicMatch[1].trim();
+            continue;
+        }
+
+        if (!autor) {
+            autor = parte;
+        }
+    }
+
+    if (turno === 'Sin turno') {
+        const personaInferida = resolverIngenieriaPersona(autor || nombreAutor);
+        if (personaInferida?.turno) {
+            turno = `${personaInferida.turno}${personaInferida.horario ? ` ${personaInferida.horario}` : ''}`.trim();
+        }
+    }
+
+    return {
+        autor: autor || nombreAutor || 'Sin nombre',
+        tipoEvento,
+        turno,
+        ubicacion
+    };
+}
+
 
 // =========================
 // HANDLER SUPERVISOR
@@ -780,12 +960,109 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
         return;
     }
 
+    if (!message.hasMedia && (desc === 'ASISTENCIA' || desc === 'EN SITIO')) {
+        iniciarFlujoAsistenciaGuiada(clave, nombreAutor);
+        await message.reply(mensajeMenuAsistenciaArea());
+        return;
+    }
+
     if (flujoActivo && !message.hasMedia && flujoActivo.tipo === 'AYUDA_GUIADA') {
         const respuesta = resolverAyudaGuiada(descripcion);
         await message.reply(
             `${respuesta}\n\n¿Otra duda? Responde 1-5.\nEscribe SALIR para cerrar.`
         );
         return;
+    }
+
+    if (flujoActivo && !message.hasMedia && flujoActivo.tipo === 'ASISTENCIA_GUIADA') {
+        if (flujoActivo.paso === 0) {
+            const area = resolverAreaAsistencia(descripcion);
+
+            if (!area) {
+                await message.reply('⚠️ Opción inválida. Responde 1 (LIMPIEZA) o 2 (MTTO).');
+                return;
+            }
+
+            flujoActivo.data.area = area;
+            flujoActivo.paso = 1;
+            await message.reply(mensajeMenuAsistenciaPersonas(area));
+            return;
+        }
+
+        if (flujoActivo.paso === 1) {
+            const area = flujoActivo.data.area;
+            const persona = resolverPersonaAsistencia(area, descripcion);
+            const ficha = resolverFichaPersonalAsistencia(area, persona);
+
+            if (!persona) {
+                await message.reply('⚠️ Persona inválida. Responde con número o nombre exacto de la lista.');
+                return;
+            }
+
+            if (area === 'LIMPIEZA') {
+                const idAsistencia = await registrarAsistenciaLimpieza({
+                    fecha,
+                    autor: persona,
+                    grupo: GRUPO_LIMPIEZA_OPERATIVA,
+                    fuenteRegistro: 'MANUAL',
+                    reportesIncremento: 1,
+                    evidenciasIncremento: 0
+                });
+
+                delete flujosSupervisor[clave];
+
+                if (!idAsistencia) {
+                    await message.reply(`⚠️ No se pudo registrar asistencia de limpieza para ${persona}.`);
+                    return;
+                }
+
+                logPersistencia({
+                    tabla: 'asistencia_limpieza_diaria',
+                    id: idAsistencia,
+                    autor: persona,
+                    grupo: chat.name,
+                    mensajeId: message.id?._serialized || construirMensajeIdManual('guiada_limpieza')
+                });
+
+                await message.reply(`✅ Asistencia (LIMPIEZA) registrada para: ${persona}`);
+                if (ficha) {
+                    await message.reply(`🕒 Turno detectado: ${ficha.turno}\nHorario: ${ficha.horario}`);
+                }
+                return;
+            }
+
+            const idAsistencia = await registrarAsistenciaMantenimiento({
+                fecha,
+                autor: persona,
+                grupo: GRUPO_ASISTENCIA_INGENIERIA,
+                tipoEvento: 'ENTRADA',
+                ubicacion: 'Centro Operativo SHP1',
+                turno: ficha?.turnoRegistro || 'Sin turno',
+                mensajeOriginal: `ALTA GUIADA DESDE CENTRO OPERATIVO | ${persona}`,
+                mensajeId: message.id?._serialized || construirMensajeIdManual('guiada_mtto')
+            });
+
+            delete flujosSupervisor[clave];
+
+            if (!idAsistencia) {
+                await message.reply(`⚠️ No se pudo registrar asistencia de mantenimiento para ${persona}.`);
+                return;
+            }
+
+            logPersistencia({
+                tabla: 'asistencia_mantenimiento_eventos',
+                id: idAsistencia,
+                autor: persona,
+                grupo: chat.name,
+                mensajeId: message.id?._serialized || construirMensajeIdManual('guiada_mtto_log')
+            });
+
+            await message.reply(
+                `✅ Asistencia (MTTO) registrada para: ${persona}` +
+                `${ficha ? `\n🕒 Turno: ${ficha.turno}\nHorario: ${ficha.horario}` : ''}`
+            );
+            return;
+        }
     }
 
     if (!message.hasMedia && COMANDOS_GUIA_PENDIENTE.includes(desc)) {
@@ -1178,7 +1455,7 @@ Estas alertas se generan cuando el personal en turno no manda evidencia dentro d
         return;
     }
 
-    if (desc === 'ASISTENCIA' || desc === 'ASISTENCIA HOY' || desc === 'EN TURNO') {
+    if (desc === 'ASISTENCIA HOY' || desc === 'EN TURNO') {
         const [ingenieria, limpieza] = await Promise.all([
             obtenerAsistenciaIngenieriaHoy(),
             obtenerEstadoTurnoLimpieza(pool)
@@ -1203,6 +1480,79 @@ Estas alertas se generan cuando el personal en turno no manda evidencia dentro d
         ].join('\n');
 
         await message.reply(respuesta);
+        return;
+    }
+
+    const asistenciaLimpiezaManualMatch = descripcion.match(/^ASISTENCIA\s+LIMPIEZA\s*:\s*(.+)$/i);
+    if (asistenciaLimpiezaManualMatch) {
+        const persona = asistenciaLimpiezaManualMatch[1]?.trim();
+
+        if (!persona) {
+            await message.reply('⚠️ Formato inválido. Usa: ASISTENCIA LIMPIEZA: Nombre Apellido');
+            return;
+        }
+
+        const idAsistencia = await registrarAsistenciaLimpieza({
+            fecha,
+            autor: persona,
+            grupo: GRUPO_LIMPIEZA_OPERATIVA,
+            fuenteRegistro: 'MANUAL',
+            reportesIncremento: 1,
+            evidenciasIncremento: 0
+        });
+
+        if (!idAsistencia) {
+            await message.reply(`⚠️ No se pudo registrar asistencia manual de limpieza para ${persona}. Revisa nombre/grupo permitido.`);
+            return;
+        }
+
+        logPersistencia({
+            tabla: 'asistencia_limpieza_diaria',
+            id: idAsistencia,
+            autor: persona,
+            grupo: chat.name,
+            mensajeId: message.id?._serialized || construirMensajeIdManual('manual_limpieza')
+        });
+
+        await message.reply(`✅ Asistencia de limpieza registrada manualmente para: ${persona}`);
+        return;
+    }
+
+    const asistenciaMttoManualMatch = descripcion.match(/^ASISTENCIA\s+(?:MTTO|MANTENIMIENTO)\s*:\s*(.+)$/i);
+    if (asistenciaMttoManualMatch) {
+        const datos = parsearAsistenciaMantenimientoManual(asistenciaMttoManualMatch[1], nombreAutor);
+
+        const idAsistencia = await registrarAsistenciaMantenimiento({
+            fecha,
+            autor: datos.autor,
+            grupo: GRUPO_ASISTENCIA_INGENIERIA,
+            tipoEvento: datos.tipoEvento,
+            ubicacion: datos.ubicacion,
+            turno: datos.turno,
+            mensajeOriginal: `ALTA MANUAL DESDE CENTRO OPERATIVO | ${descripcion}`,
+            mensajeId: message.id?._serialized || construirMensajeIdManual('manual_mtto')
+        });
+
+        if (!idAsistencia) {
+            await message.reply(`⚠️ No se pudo registrar asistencia manual de mantenimiento para ${datos.autor}.`);
+            return;
+        }
+
+        logPersistencia({
+            tabla: 'asistencia_mantenimiento_eventos',
+            id: idAsistencia,
+            autor: datos.autor,
+            grupo: chat.name,
+            mensajeId: message.id?._serialized || construirMensajeIdManual('manual_mtto_log')
+        });
+
+        await message.reply(
+            `✅ Asistencia de mantenimiento registrada manualmente\n` +
+            `Persona: ${datos.autor}\n` +
+            `Tipo: ${datos.tipoEvento}\n` +
+            `Turno: ${datos.turno}\n` +
+            `Ubicación: ${datos.ubicacion}`
+        );
         return;
     }
 

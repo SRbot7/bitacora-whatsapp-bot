@@ -188,12 +188,12 @@ async function obtenerResumenOperativo({ inicioDia, finDia }) {
     ] = await Promise.all([
         contar(`
             SELECT COUNT(*)::int AS total
-            FROM actividades_mtto
+            FROM bitacora
             WHERE grupo = 'BITACORA-MTTO-SHP1'
         `),
         contar(`
             SELECT COUNT(*)::int AS total
-            FROM actividades_mtto
+            FROM bitacora
             WHERE grupo = 'BITACORA-MTTO-SHP1'
               AND fecha >= $1
               AND fecha <= $2

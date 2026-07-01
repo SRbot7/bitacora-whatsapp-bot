@@ -1,4 +1,9 @@
 const pool = require('../db');
+const {
+    resolverPersonaMarcador,
+    extraerHorarioTurno,
+    normalizarTexto: normalizarTextoMarcador
+} = require('./limpieza-personal');
 
 let tablaCreada = false;
 
@@ -71,6 +76,10 @@ async function asegurarTablaAsistenciaLimpieza() {
             id SERIAL PRIMARY KEY,
             fecha DATE NOT NULL,
             autor TEXT NOT NULL,
+            persona_key TEXT,
+            turno TEXT,
+            horario TEXT,
+            fuente_registro TEXT,
             grupo TEXT NOT NULL,
             primer_reporte TIMESTAMP NOT NULL,
             ultimo_reporte TIMESTAMP NOT NULL,
@@ -82,13 +91,96 @@ async function asegurarTablaAsistenciaLimpieza() {
         )
     `);
 
+    await pool.query('ALTER TABLE asistencia_limpieza_diaria ADD COLUMN IF NOT EXISTS persona_key TEXT');
+    await pool.query('ALTER TABLE asistencia_limpieza_diaria ADD COLUMN IF NOT EXISTS turno TEXT');
+    await pool.query('ALTER TABLE asistencia_limpieza_diaria ADD COLUMN IF NOT EXISTS horario TEXT');
+    await pool.query('ALTER TABLE asistencia_limpieza_diaria ADD COLUMN IF NOT EXISTS fuente_registro TEXT');
+
     tablaCreada = true;
+}
+
+function construirClavePersonaFallback(autor = '') {
+    const normalizado = normalizarTextoMarcador(autor)
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, '_')
+        .replace(/^_+|_+$/g, '');
+
+    return normalizado || 'sin_nombre';
+}
+
+function enriquecerPersonaAsistenciaLimpieza(autor = '') {
+    const persona = resolverPersonaMarcador(autor);
+    if (!persona) {
+        return {
+            autorCanonico: autor || 'Sin nombre',
+            personaKey: construirClavePersonaFallback(autor),
+            turno: null,
+            horario: null
+        };
+    }
+
+    const horarioTurno = extraerHorarioTurno(persona.turno || '');
+    return {
+        autorCanonico: persona.nombre,
+        personaKey: persona.key,
+        turno: persona.turno || null,
+        horario: horarioTurno ? `${horarioTurno.turnoInicio}-${horarioTurno.turnoFin}` : null
+    };
+}
+
+async function resolverAutorPersistente({ fechaDia, grupo, autorCanonico, personaKey }) {
+    const filasDia = await pool.query(
+        `
+        SELECT id, autor
+        FROM asistencia_limpieza_diaria
+        WHERE fecha = $1
+          AND grupo = $2
+        ORDER BY id ASC
+        `,
+        [fechaDia, grupo || 'Sin grupo']
+    );
+
+    const filasMismaPersona = filasDia.rows.filter((row) => {
+        const enriquecida = enriquecerPersonaAsistenciaLimpieza(row.autor);
+        return enriquecida.personaKey === personaKey;
+    });
+
+    const filaCanonica = filasMismaPersona.find((row) => row.autor === autorCanonico);
+    const filaMismaPersona = filaCanonica || filasMismaPersona[0];
+
+    if (!filaMismaPersona) {
+        return autorCanonico;
+    }
+
+    if (filaMismaPersona.autor === autorCanonico) {
+        return autorCanonico;
+    }
+
+    try {
+        await pool.query(
+            `
+            UPDATE asistencia_limpieza_diaria
+            SET autor = $1, updated_at = NOW()
+            WHERE id = $2
+            `,
+            [autorCanonico, filaMismaPersona.id]
+        );
+
+        return autorCanonico;
+    } catch (error) {
+        if (error && error.code === '23505') {
+            return filaMismaPersona.autor;
+        }
+
+        throw error;
+    }
 }
 
 async function registrarAsistenciaLimpieza({
     fecha,
     autor,
     grupo,
+    fuenteRegistro = 'AUTOMATICO',
     reportesIncremento = 0,
     evidenciasIncremento = 0
 }) {
@@ -103,8 +195,18 @@ async function registrarAsistenciaLimpieza({
         return;
     }
 
+    const persona = enriquecerPersonaAsistenciaLimpieza(autor || 'Sin nombre');
     const ts = fecha.format('YYYY-MM-DD HH:mm:ss');
     const fechaDia = fecha.format('YYYY-MM-DD');
+    const autorPersistente = await resolverAutorPersistente({
+        fechaDia,
+        grupo,
+        autorCanonico: persona.autorCanonico,
+        personaKey: persona.personaKey
+    });
+
+    const reporteBandera = reportesIncremento > 0 ? 1 : 0;
+    const evidenciaBandera = evidenciasIncremento > 0 ? 1 : 0;
 
     const resultado = await pool.query(
         `
@@ -112,30 +214,46 @@ async function registrarAsistenciaLimpieza({
         (
             fecha,
             autor,
+            persona_key,
+            turno,
+            horario,
+            fuente_registro,
             grupo,
             primer_reporte,
             ultimo_reporte,
             total_reportes,
             total_evidencias
         )
-        VALUES ($1, $2, $3, $4, $4, $5, $6)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9, $10)
         ON CONFLICT (fecha, autor, grupo)
         DO UPDATE
         SET
             primer_reporte = LEAST(asistencia_limpieza_diaria.primer_reporte, EXCLUDED.primer_reporte),
             ultimo_reporte = GREATEST(asistencia_limpieza_diaria.ultimo_reporte, EXCLUDED.ultimo_reporte),
-            total_reportes = asistencia_limpieza_diaria.total_reportes + EXCLUDED.total_reportes,
-            total_evidencias = asistencia_limpieza_diaria.total_evidencias + EXCLUDED.total_evidencias,
+            total_reportes = GREATEST(asistencia_limpieza_diaria.total_reportes, EXCLUDED.total_reportes),
+            total_evidencias = GREATEST(asistencia_limpieza_diaria.total_evidencias, EXCLUDED.total_evidencias),
+            persona_key = COALESCE(asistencia_limpieza_diaria.persona_key, EXCLUDED.persona_key),
+            turno = COALESCE(asistencia_limpieza_diaria.turno, EXCLUDED.turno),
+            horario = COALESCE(asistencia_limpieza_diaria.horario, EXCLUDED.horario),
+            fuente_registro =
+                CASE
+                    WHEN asistencia_limpieza_diaria.fuente_registro = 'MANUAL' THEN asistencia_limpieza_diaria.fuente_registro
+                    ELSE EXCLUDED.fuente_registro
+                END,
             updated_at = NOW()
         RETURNING id
         `,
         [
             fechaDia,
-            autor || 'Sin nombre',
+            autorPersistente || 'Sin nombre',
+            persona.personaKey,
+            persona.turno,
+            persona.horario,
+            (fuenteRegistro || 'AUTOMATICO').toUpperCase(),
             grupo || 'Sin grupo',
             ts,
-            reportesIncremento,
-            evidenciasIncremento
+            reporteBandera,
+            evidenciaBandera
         ]
     );
 

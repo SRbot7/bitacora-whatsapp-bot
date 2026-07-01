@@ -8,6 +8,7 @@ const pool = require('./db');
 const { obtenerTextoMensaje } = require('./lib/bitacora-parser');
 const { manejarSupervisor }   = require('./handlers/supervisor');
 const { manejarBitacora }     = require('./handlers/bitacora');
+const { manejarLimpieza }     = require('./handlers/limpieza');
 const { manejarPreventivos }   = require('./handlers/preventivos');
 const {
     obtenerAlertasAsistenciaLimpieza,
@@ -26,7 +27,8 @@ const {
 
 const GRUPOS = {
     'BITACORA-MTTO-SHP1':                'BITACORA',
-    'Centro Operativo SHP1':             'SUPERVISOR'
+    'Centro Operativo SHP1':             'SUPERVISOR',
+    'MELI SVC PACHUCA - BATIA LIMPIEZA': 'LIMPIEZA'
 };
 
 const HORARIOS_REPORTE = ['06:30', '15:30', '22:30'];
@@ -68,6 +70,36 @@ function esSolicitudPreventivoEnSupervisor(texto = '') {
         comando.startsWith('OP SHP1') ||
         comandoCompacto.startsWith('OPSHP1')
     );
+}
+
+function esEntradaOperativaSupervisorDesdePropio(texto = '') {
+    const comando = normalizarComando(texto);
+    if (!comando) {
+        return false;
+    }
+
+    const comandosDirectos = new Set([
+        'ASISTENCIA', 'EN SITIO',
+        'ASISTENCIA HOY', 'EN TURNO',
+        'AYUDA', 'AYUDA GUIADA', 'GUIA AYUDA', 'AYUDA RAPIDA',
+        'LISTAR', 'ABIERTOS', 'CERRADOS',
+        'PREVENTIVOS', 'ALERTAS',
+        'CANCELAR', 'SALIR',
+        '1', '2',
+        'LIMPIEZA', 'MTTO', 'MANTENIMIENTO'
+    ]);
+
+    if (comandosDirectos.has(comando)) {
+        return true;
+    }
+
+    // Opciones numericas de menus guiados (ej. 1, 2, 3, ...).
+    if (/^\d{1,2}$/.test(comando)) {
+        return true;
+    }
+
+    // Seleccion de persona en flujo guiado: una sola linea, sin emojis ni saltos.
+    return /^[A-Z0-9 .'-]{2,60}$/.test(comando);
 }
 
 async function revisarAlertasAsistencia({ clientRef }) {
@@ -339,6 +371,20 @@ client.on('message_create', async (message) => {
             return;
         }
 
+        if (message.fromMe) {
+            const permitirFromMeSupervisor =
+                tipoFuente === 'SUPERVISOR' && esEntradaOperativaSupervisorDesdePropio(textoOriginal);
+
+            if (!permitirFromMeSupervisor) {
+                console.log('⏸️ Mensaje fromMe ignorado:', {
+                    grupo: chat.name,
+                    tipoFuente,
+                    preview: textoOriginal.replace(/\s+/g, ' ').slice(0, 80)
+                });
+                return;
+            }
+        }
+
         const messageSafe = crearMensajeSoloLectura(message, chat);
         const chatSafe = crearChatSoloLectura(chat);
 
@@ -384,6 +430,17 @@ client.on('message_create', async (message) => {
 
         if (tipoFuente === 'BITACORA') {
             await manejarBitacora({
+                message: messageSafe,
+                chat: chatSafe,
+                textoOriginal,
+                nombreAutor,
+                fecha
+            });
+            return;
+        }
+
+        if (tipoFuente === 'LIMPIEZA') {
+            await manejarLimpieza({
                 message: messageSafe,
                 chat: chatSafe,
                 textoOriginal,

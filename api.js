@@ -71,7 +71,8 @@ const EQUIPO_INGENIERIA = [
 app.use(cors());
 app.use(express.json());
 app.use(express.static('dashboard'));
-app.use('/evidencias', express.static('evidencias'));
+app.use('/evidencias_bitacora', express.static('evidencias_bitacora'));
+app.use('/evidencias', express.static('evidencias_bitacora'));
 app.use('/evidencias_limpieza', express.static('evidencias_limpieza'));
 
 // =========================
@@ -434,7 +435,7 @@ app.get('/', (req, res) => {
 app.get('/api/v1/summary', async (req, res) => {
     try {
         const [bitacora, limpieza, pendientes, preventivos, materiales, proyectos] = await Promise.all([
-            pool.query(`SELECT COUNT(*)::int AS total FROM actividades_mtto WHERE grupo = 'BITACORA-MTTO-SHP1'`),
+            pool.query(`SELECT COUNT(*)::int AS total FROM bitacora WHERE grupo = 'BITACORA-MTTO-SHP1'`),
             pool.query(`
                 SELECT COUNT(*)::int AS total
                 FROM actividades_limpieza
@@ -504,7 +505,7 @@ app.get('/api/v1/bitacora/actividades', async (req, res) => {
         }
 
         const data = await runPaginatedQuery({
-            baseFrom: 'FROM actividades_mtto',
+            baseFrom: 'FROM bitacora',
             where,
             params,
             orderBy: 'ORDER BY fecha DESC, id DESC',
@@ -527,7 +528,7 @@ app.get('/api/v1/bitacora/actividades/:id/evidencias', async (req, res) => {
             `
             SELECT e.*
             FROM evidencias_mtto e
-            JOIN actividades_mtto a ON a.id = e.actividad_id
+                        JOIN bitacora a ON a.id = e.actividad_id
             WHERE e.actividad_id = $1
               AND a.grupo = 'BITACORA-MTTO-SHP1'
             ORDER BY e.fecha ASC, e.id ASC
@@ -1602,7 +1603,7 @@ app.get('/actividades', async (req, res) => {
         const resultado = await pool.query(
             `
             SELECT *
-            FROM actividades_mtto
+            FROM bitacora
             WHERE grupo = 'BITACORA-MTTO-SHP1'
             ORDER BY fecha DESC
             LIMIT 100
@@ -1622,7 +1623,7 @@ app.get('/actividad/:id', async (req, res) => {
         const resultado = await pool.query(
             `
             SELECT *
-            FROM actividades_mtto
+                        FROM bitacora
             WHERE id = $1
               AND grupo = 'BITACORA-MTTO-SHP1'
             `,
