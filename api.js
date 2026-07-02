@@ -12,6 +12,10 @@ const {
     asegurarTablaAsistenciaMantenimiento
 } = require('./services/asistencia-mantenimiento');
 const {
+    sincronizarEstadosAsistencia,
+    obtenerEstadosAsistenciaDia
+} = require('./services/estado-asistencia');
+const {
     MARCADOR_BASE_WEEK_ISO,
     MARCADOR_PERSONAL,
     DESCANSOS_FIJOS_PERSONAL,
@@ -43,27 +47,31 @@ const LIMPIEZA_GROUP_WINDOW_MINUTES = Math.max(
 );
 
 const GRUPO_ASISTENCIA_INGENIERIA = 'Asistencia SHP1 Pachuca';
+const ASISTENCIA_RETARDO_MINUTOS = Math.max(
+    1,
+    Number.parseInt(process.env.ASISTENCIA_RETARDO_MINUTOS || '60', 10) || 60
+);
 
 const EQUIPO_INGENIERIA = [
     {
         key: 'saul',
         nombre: 'Saul Romero Romero',
         puesto: 'Electromecanico',
-        turno: '1er turno',
+        turno: '1er turno 06:00-14:00',
         aliases: ['saul romero romero', 'saul romero', 'saul']
     },
     {
         key: 'eliezer',
         nombre: 'Eliezer Romero Romero',
         puesto: 'Multitecnico',
-        turno: '2do turno',
+        turno: '2do turno 14:00-22:00',
         aliases: ['eliezer romero romero', 'eliezer romero', 'eliezer']
     },
     {
         key: 'flavio',
         nombre: 'Flavio Cruz Santiago',
         puesto: 'Multitecnico',
-        turno: '3er turno',
+        turno: '3er turno 22:00-06:00',
         aliases: ['flavio cruz santiago', 'flavio cruz', 'flavio']
     }
 ];
@@ -194,6 +202,73 @@ function buildWeekDays(weekStartDate) {
     });
 }
 
+function extraerHorarioTurno(turno = '') {
+    const match = (turno || '').match(/(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})/);
+    if (!match) {
+        return null;
+    }
+
+    return {
+        turnoInicio: match[1],
+        turnoFin: match[2]
+    };
+}
+
+function construirFechaConHoraIso(fechaIso = '', hhmm = '') {
+    if (!fechaIso || !hhmm) {
+        return null;
+    }
+
+    const iso = `${fechaIso}T${hhmm}:00`;
+    const dt = new Date(iso);
+    return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function resolverEstadoAsistenciaDiaria({
+    descanso = false,
+    turno = '',
+    fechaIso = '',
+    primerReporte = null,
+    totalReportes = 0,
+    totalEvidencias = 0,
+    requiereEvidencia = false
+}) {
+    if (descanso) {
+        return 'D';
+    }
+
+    const reportes = Number(totalReportes || 0);
+    const evidencias = Number(totalEvidencias || 0);
+    const tieneActividad = reportes > 0 || evidencias > 0;
+
+    if (!tieneActividad) {
+        return 'F';
+    }
+
+    if (requiereEvidencia && evidencias <= 0) {
+        return 'R';
+    }
+
+    const horario = extraerHorarioTurno(turno);
+    if (!horario) {
+        return 'A';
+    }
+
+    const inicioTurno = construirFechaConHoraIso(fechaIso, horario.turnoInicio);
+    if (!inicioTurno) {
+        return 'A';
+    }
+
+    const limiteRetardo = new Date(inicioTurno.getTime() + (ASISTENCIA_RETARDO_MINUTOS * 60 * 1000));
+    const primer = primerReporte ? new Date(primerReporte) : null;
+
+    if (!primer || Number.isNaN(primer.getTime())) {
+        return 'R';
+    }
+
+    return primer <= limiteRetardo ? 'A' : 'R';
+}
+
 let tablaAjustesAsistenciaCreada = false;
 
 async function asegurarTablaAjustesAsistencia() {
@@ -264,7 +339,8 @@ function buildIngenieriaRows({ rows, personaKeyByAutor = false }) {
             ultimo_reporte: null,
             autores: [],
             dias_con_asistencia: new Set(),
-            dias_con_evidencia: new Set()
+            dias_con_evidencia: new Set(),
+            fechas: new Set()
         };
 
         const fechaRow = row.fecha ? toDateOnlyIso(new Date(row.fecha)) : null;
@@ -278,6 +354,9 @@ function buildIngenieriaRows({ rows, personaKeyByAutor = false }) {
         }
         if (fechaRow && evidencias > 0) {
             previo.dias_con_evidencia.add(fechaRow);
+        }
+        if (fechaRow) {
+            previo.fechas.add(fechaRow);
         }
 
         previo.primer_reporte = previo.primer_reporte
@@ -302,10 +381,23 @@ function buildIngenieriaRows({ rows, personaKeyByAutor = false }) {
             ultimo_reporte: null,
             autores: [],
             dias_con_asistencia: new Set(),
-            dias_con_evidencia: new Set()
+            dias_con_evidencia: new Set(),
+            fechas: new Set()
         };
 
-        const estado = agg.total_reportes > 0 || agg.total_evidencias > 0 ? 'A' : 'F';
+        let estado = agg.total_reportes > 0 || agg.total_evidencias > 0 ? 'A' : 'F';
+        if (estado !== 'F' && agg.fechas.size === 1) {
+            const [fechaUnica] = Array.from(agg.fechas.values());
+            estado = resolverEstadoAsistenciaDiaria({
+                descanso: false,
+                turno: persona.turno,
+                fechaIso: fechaUnica,
+                primerReporte: agg.primer_reporte,
+                totalReportes: agg.total_reportes,
+                totalEvidencias: agg.total_evidencias,
+                requiereEvidencia: false
+            });
+        }
 
         return {
             persona: persona.nombre,
@@ -321,6 +413,110 @@ function buildIngenieriaRows({ rows, personaKeyByAutor = false }) {
             autores_detectados: agg.autores
         };
     });
+}
+
+function buildIngenieriaMarcadorRows({ rows, weekStartDate, autorFiltro = '' }) {
+    const dias = buildWeekDays(weekStartDate);
+    const mapaAsistencia = new Map();
+
+    for (const row of rows) {
+        const persona = resolverIngenieriaPersona(row.autor);
+        if (!persona) {
+            continue;
+        }
+
+        if (!autorPermitidoPorGrupo(row.autor, GRUPO_ASISTENCIA_INGENIERIA)) {
+            continue;
+        }
+
+        const fechaIso = row.fecha ? toDateOnlyIso(new Date(row.fecha)) : null;
+        if (!fechaIso) {
+            continue;
+        }
+
+        const key = `${persona.key}|${fechaIso}`;
+        const previo = mapaAsistencia.get(key) || {
+            total_reportes: 0,
+            total_evidencias: 0,
+            primer_reporte: null,
+            autores: new Set()
+        };
+
+        previo.total_reportes += Number(row.total_reportes || 0);
+        previo.total_evidencias += Number(row.total_evidencias || 0);
+        if (row.primer_reporte) {
+            const previoPrimer = previo.primer_reporte ? new Date(previo.primer_reporte) : null;
+            const candidato = new Date(row.primer_reporte);
+            if (!previoPrimer || candidato < previoPrimer) {
+                previo.primer_reporte = row.primer_reporte;
+            }
+        }
+        previo.autores.add(row.autor);
+
+        mapaAsistencia.set(key, previo);
+    }
+
+    const autorFiltroN = normalizarTexto(autorFiltro || '');
+    const personalFiltrado = EQUIPO_INGENIERIA.filter((persona) => {
+        if (!autorFiltroN) {
+            return true;
+        }
+
+        const nombreN = normalizarTexto(persona.nombre);
+        if (nombreN.includes(autorFiltroN)) {
+            return true;
+        }
+
+        return persona.aliases.some((alias) => normalizarTexto(alias).includes(autorFiltroN));
+    });
+
+    const items = personalFiltrado.map((persona) => {
+        const marcador = dias.map((dia) => {
+            const asistencia = mapaAsistencia.get(`${persona.key}|${dia.fecha}`) || {
+                total_reportes: 0,
+                total_evidencias: 0,
+                primer_reporte: null,
+                autores: new Set()
+            };
+
+            const estado = resolverEstadoAsistenciaDiaria({
+                descanso: false,
+                turno: persona.turno,
+                fechaIso: dia.fecha,
+                primerReporte: asistencia.primer_reporte,
+                totalReportes: asistencia.total_reportes,
+                totalEvidencias: asistencia.total_evidencias,
+                requiereEvidencia: false
+            });
+
+            return {
+                fecha: dia.fecha,
+                estado,
+                total_reportes: asistencia.total_reportes,
+                total_evidencias: asistencia.total_evidencias,
+                primer_reporte: asistencia.primer_reporte,
+                autores: Array.from(asistencia.autores)
+            };
+        });
+
+        const totales = marcador.reduce((acc, dia) => {
+            acc[dia.estado] += 1;
+            return acc;
+        }, { A: 0, D: 0, R: 0, F: 0 });
+
+        return {
+            persona: persona.nombre,
+            puesto: persona.puesto,
+            turno: persona.turno,
+            marcador,
+            totales
+        };
+    });
+
+    return {
+        days: dias.map((dia) => dia.fecha),
+        items
+    };
 }
 
 async function queryIngenieriaByDateRange({ fechaInicio, fechaFin }) {
@@ -1149,6 +1345,7 @@ app.get('/api/v1/limpieza/asistencia-semanal', async (req, res) => {
         const listRes = await pool.query(listSql, [...params, pageSize, offset]);
 
         res.json({
+            periodo: 'semanal',
             page,
             pageSize,
             total,
@@ -1158,6 +1355,101 @@ app.get('/api/v1/limpieza/asistencia-semanal', async (req, res) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Error al consultar asistencia semanal de limpieza' });
+    }
+});
+
+app.get('/api/v1/limpieza/asistencia-mensual', async (req, res) => {
+    try {
+        await asegurarTablaAsistenciaLimpieza();
+
+        const { page, pageSize, offset } = getPagination(req);
+        const { from, to, autor, grupo } = req.query;
+
+        const where = [];
+        const params = [];
+        let idx = 1;
+
+        if (from) {
+            where.push(`fecha >= $${idx++}`);
+            params.push(from);
+        }
+
+        if (to) {
+            where.push(`fecha <= $${idx++}`);
+            params.push(to);
+        }
+
+        if (autor) {
+            where.push(`autor ILIKE $${idx++}`);
+            params.push(`%${autor}%`);
+        }
+
+        if (grupo) {
+            where.push(`grupo ILIKE $${idx++}`);
+            params.push(`%${grupo}%`);
+        }
+
+        const autoresExcluidos = obtenerAutoresExcluidosAsistencia();
+        for (const autorExcluido of autoresExcluidos) {
+            where.push(`autor NOT ILIKE $${idx++}`);
+            params.push(`%${autorExcluido}%`);
+        }
+
+        const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+
+        const countSql = `
+            WITH agrupado AS (
+                SELECT
+                    DATE_TRUNC('month', fecha)::date AS mes_inicio,
+                    autor,
+                    grupo
+                FROM asistencia_limpieza_diaria
+                ${whereSql}
+                GROUP BY DATE_TRUNC('month', fecha)::date, autor, grupo
+            )
+            SELECT COUNT(*)::int AS total
+            FROM agrupado
+        `;
+
+        const countRes = await pool.query(countSql, params);
+        const total = countRes.rows[0]?.total || 0;
+
+        const listSql = `
+            WITH agrupado AS (
+                SELECT
+                    DATE_TRUNC('month', fecha)::date AS mes_inicio,
+                    (DATE_TRUNC('month', fecha)::date + INTERVAL '1 month - 1 day')::date AS mes_fin,
+                    autor,
+                    grupo,
+                    SUM(total_reportes)::int AS total_reportes,
+                    SUM(total_evidencias)::int AS total_evidencias,
+                    COUNT(*) FILTER (WHERE total_reportes > 0)::int AS dias_con_asistencia,
+                    MIN(primer_reporte) AS primer_reporte_mes,
+                    MAX(ultimo_reporte) AS ultimo_reporte_mes
+                FROM asistencia_limpieza_diaria
+                ${whereSql}
+                GROUP BY DATE_TRUNC('month', fecha)::date, autor, grupo
+            )
+            SELECT *
+            FROM agrupado
+            ORDER BY mes_inicio DESC, autor ASC
+            LIMIT $${params.length + 1}
+            OFFSET $${params.length + 2}
+        `;
+
+        const listRes = await pool.query(listSql, [...params, pageSize, offset]);
+
+        res.json({
+            periodo: 'mensual',
+            page,
+            pageSize,
+            total,
+            totalPages: Math.max(1, Math.ceil(total / pageSize)),
+            items: listRes.rows
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error al consultar asistencia mensual de limpieza' });
     }
 });
 
@@ -1200,7 +1492,8 @@ app.get('/api/v1/limpieza/asistencia-marcador', async (req, res) => {
                 autor,
                 grupo,
                 SUM(total_reportes)::int AS total_reportes,
-                SUM(total_evidencias)::int AS total_evidencias
+                SUM(total_evidencias)::int AS total_evidencias,
+                MIN(primer_reporte) AS primer_reporte
             FROM asistencia_limpieza_diaria
             WHERE ${where.join(' AND ')}
             GROUP BY fecha::date, autor, grupo
@@ -1239,10 +1532,22 @@ app.get('/api/v1/limpieza/asistencia-marcador', async (req, res) => {
 
             const fechaIso = toDateOnlyIso(new Date(row.fecha));
             const key = `${persona.key}|${fechaIso}`;
-            const previo = mapaAsistencia.get(key) || { total_reportes: 0, total_evidencias: 0, autores: new Set() };
+            const previo = mapaAsistencia.get(key) || {
+                total_reportes: 0,
+                total_evidencias: 0,
+                primer_reporte: null,
+                autores: new Set()
+            };
 
             previo.total_reportes += Number(row.total_reportes || 0);
             previo.total_evidencias += Number(row.total_evidencias || 0);
+            if (row.primer_reporte) {
+                const previoPrimer = previo.primer_reporte ? new Date(previo.primer_reporte) : null;
+                const candidato = new Date(row.primer_reporte);
+                if (!previoPrimer || candidato < previoPrimer) {
+                    previo.primer_reporte = row.primer_reporte;
+                }
+            }
             previo.autores.add(row.autor);
 
             mapaAsistencia.set(key, previo);
@@ -1267,6 +1572,7 @@ app.get('/api/v1/limpieza/asistencia-marcador', async (req, res) => {
                 const asistencia = mapaAsistencia.get(`${persona.key}|${dia.fecha}`) || {
                     total_reportes: 0,
                     total_evidencias: 0,
+                    primer_reporte: null,
                     autores: new Set()
                 };
 
@@ -1282,11 +1588,15 @@ app.get('/api/v1/limpieza/asistencia-marcador', async (req, res) => {
                     descanso = false;
                 }
 
-                const estado = descanso
-                    ? 'R'
-                    : asistencia.total_reportes > 0 || asistencia.total_evidencias > 0
-                        ? 'A'
-                        : 'F';
+                const estado = resolverEstadoAsistenciaDiaria({
+                    descanso,
+                    turno: persona.turno,
+                    fechaIso: dia.fecha,
+                    primerReporte: asistencia.primer_reporte,
+                    totalReportes: asistencia.total_reportes,
+                    totalEvidencias: asistencia.total_evidencias,
+                    requiereEvidencia: true
+                });
 
                 return {
                     fecha: dia.fecha,
@@ -1294,6 +1604,7 @@ app.get('/api/v1/limpieza/asistencia-marcador', async (req, res) => {
                     descanso,
                     total_reportes: asistencia.total_reportes,
                     total_evidencias: asistencia.total_evidencias,
+                    primer_reporte: asistencia.primer_reporte,
                     autores: Array.from(asistencia.autores)
                 };
             });
@@ -1301,7 +1612,7 @@ app.get('/api/v1/limpieza/asistencia-marcador', async (req, res) => {
             const totales = marcador.reduce((acc, dia) => {
                 acc[dia.estado] += 1;
                 return acc;
-            }, { A: 0, R: 0, F: 0 });
+            }, { A: 0, D: 0, R: 0, F: 0 });
 
             return {
                 persona: persona.nombre,
@@ -1479,6 +1790,24 @@ app.get('/api/v1/ingenieria/asistencia-hoy', async (req, res) => {
     }
 });
 
+app.get('/api/v1/asistencia/estado-hoy', async (req, res) => {
+    try {
+        await sincronizarEstadosAsistencia(pool);
+
+        const limpieza = await obtenerEstadosAsistenciaDia(pool, 'LIMPIEZA');
+        const mantenimiento = await obtenerEstadosAsistenciaDia(pool, 'MTTO');
+
+        res.json({
+            fecha: (await pool.query(`SELECT (NOW() AT TIME ZONE 'America/Mexico_City')::date AS fecha_hoy`)).rows[0]?.fecha_hoy,
+            limpieza,
+            mantenimiento
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error al consultar estado actual de asistencia' });
+    }
+});
+
 app.get('/api/v1/ingenieria/asistencia-semanal', async (req, res) => {
     try {
         await asegurarTablaAsistenciaLimpieza();
@@ -1545,6 +1874,63 @@ app.get('/api/v1/ingenieria/asistencia-mensual', async (req, res) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Error al consultar asistencia mensual de ingenieria' });
+    }
+});
+
+app.get('/api/v1/ingenieria/asistencia-marcador', async (req, res) => {
+    try {
+        await asegurarTablaAsistenciaLimpieza();
+
+        const { page, pageSize, offset } = getPagination(req);
+        const { autor, grupo, weekStart } = req.query;
+
+        const weekStartDate = resolveWeekStartDate(weekStart, req.query.from);
+        const weekEndDate = new Date(weekStartDate);
+        weekEndDate.setUTCDate(weekStartDate.getUTCDate() + 6);
+
+        const fechaInicio = toDateOnlyIso(weekStartDate);
+        const fechaFin = toDateOnlyIso(weekEndDate);
+        const rows = await queryIngenieriaByDateRange({ fechaInicio, fechaFin });
+
+        const autorFiltro = (autor || '').toString().trim();
+        const grupoFiltro = (grupo || '').toString().trim();
+        const rowsFiltradas = rows.filter((row) => {
+            if (grupoFiltro && !normalizarTexto(row.grupo || '').includes(normalizarTexto(grupoFiltro))) {
+                return false;
+            }
+
+            if (!autorFiltro) {
+                return true;
+            }
+
+            const autorRow = normalizarTexto(row.autor || '');
+            const autorFiltroN = normalizarTexto(autorFiltro);
+            return autorRow.includes(autorFiltroN) || autorFiltroN.includes(autorRow);
+        });
+
+        const personal = buildIngenieriaMarcadorRows({
+            rows: rowsFiltradas,
+            weekStartDate,
+            autorFiltro
+        });
+
+        const total = personal.items.length;
+        const items = personal.items.slice(offset, offset + pageSize);
+
+        res.json({
+            periodo: 'marcador',
+            page,
+            pageSize,
+            total,
+            totalPages: Math.max(1, Math.ceil(total / pageSize)),
+            weekStart: fechaInicio,
+            weekEnd: fechaFin,
+            days: personal.days,
+            items
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error al consultar marcador de asistencia de ingenieria' });
     }
 });
 

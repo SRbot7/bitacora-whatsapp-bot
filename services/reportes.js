@@ -1,9 +1,11 @@
 const pool = require('../db');
 const {
-    obtenerEstadoTurnoLimpieza,
     obtenerAlertasAsistenciaLimpieza,
     obtenerAlertasAsistenciaIngenieria
 } = require('./alertas-asistencia');
+const {
+    obtenerEstadosAsistenciaDia
+} = require('./estado-asistencia');
 
 const GRUPO_ASISTENCIA_INGENIERIA = 'Asistencia SHP1 Pachuca';
 const EQUIPO_INGENIERIA = [
@@ -126,12 +128,52 @@ async function obtenerAsistenciaIngenieriaHoy() {
     };
 }
 
+function construirResumenEstadoPersistido(items = [], area = '') {
+    const resumen = {
+        enTurno: [],
+        salida: [],
+        fueraTurno: [],
+        descanso: [],
+        sinCobertura: true
+    };
+
+    for (const item of items) {
+        const persona = item?.persona || '-';
+        const estado = normalizarTexto((item?.estadoTurno || '').toString());
+
+        if (estado === 'descanso') {
+            resumen.descanso.push(persona);
+            continue;
+        }
+
+        resumen.sinCobertura = false;
+
+        if (estado === 'en_turno' || estado === 'enturno') {
+            resumen.enTurno.push(persona);
+            continue;
+        }
+
+        if (estado === 'salida') {
+            resumen.salida.push(persona);
+            continue;
+        }
+
+        resumen.fueraTurno.push(persona);
+    }
+
+    if (area === 'LIMPIEZA' && resumen.enTurno.length === 0 && resumen.salida.length === 0 && resumen.descanso.length === 0) {
+        resumen.sinCobertura = true;
+    }
+
+    return resumen;
+}
+
 async function obtenerResumenAsistenciaGeneral() {
     const warnings = [];
 
     const [ingenieriaRes, limpiezaRes, alertasLimpiezaRes, alertasIngenieriaRes] = await Promise.allSettled([
-        obtenerAsistenciaIngenieriaHoy(),
-        obtenerEstadoTurnoLimpieza(pool),
+        obtenerEstadosAsistenciaDia(pool, 'MTTO'),
+        obtenerEstadosAsistenciaDia(pool, 'LIMPIEZA'),
         obtenerAlertasAsistenciaLimpieza(pool),
         obtenerAlertasAsistenciaIngenieria(pool)
     ]);
@@ -143,13 +185,34 @@ async function obtenerResumenAsistenciaGeneral() {
         warnings.push('limpieza_no_disponible');
     }
 
-    const ingenieria = ingenieriaRes.status === 'fulfilled'
-        ? ingenieriaRes.value
-        : { totalEquipo: EQUIPO_INGENIERIA.length, presentes: [], faltantes: EQUIPO_INGENIERIA.map((x) => x.nombre) };
+    const ingenieriaPersistida = ingenieriaRes.status === 'fulfilled'
+        ? construirResumenEstadoPersistido(ingenieriaRes.value, 'MTTO')
+        : construirResumenEstadoPersistido([], 'MTTO');
 
-    const limpieza = limpiezaRes.status === 'fulfilled'
-        ? limpiezaRes.value
-        : { sinCobertura: true, enTurno: [], sinRegistro: [], descanso: [] };
+    const ingenieria = {
+        fecha: moment().tz('America/Mexico_City').format('YYYY-MM-DD'),
+        totalEquipo: EQUIPO_INGENIERIA.length,
+        presentes: [...ingenieriaPersistida.enTurno, ...ingenieriaPersistida.salida],
+        faltantes: ingenieriaPersistida.fueraTurno,
+        enTurno: ingenieriaPersistida.enTurno,
+        salida: ingenieriaPersistida.salida,
+        fueraTurno: ingenieriaPersistida.fueraTurno,
+        descanso: ingenieriaPersistida.descanso,
+        sinCobertura: ingenieriaPersistida.sinCobertura
+    };
+
+    const limpiezaPersistida = limpiezaRes.status === 'fulfilled'
+        ? construirResumenEstadoPersistido(limpiezaRes.value, 'LIMPIEZA')
+        : construirResumenEstadoPersistido([], 'LIMPIEZA');
+
+    const limpieza = {
+        sinCobertura: limpiezaPersistida.sinCobertura,
+        enTurno: limpiezaPersistida.enTurno,
+        sinRegistro: limpiezaPersistida.fueraTurno,
+        salida: limpiezaPersistida.salida,
+        descanso: limpiezaPersistida.descanso,
+        fueraTurno: limpiezaPersistida.fueraTurno
+    };
 
     const alertasActivas =
         (alertasLimpiezaRes.status === 'fulfilled' ? (alertasLimpiezaRes.value.items || []).length : 0) +

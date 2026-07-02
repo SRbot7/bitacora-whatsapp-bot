@@ -112,6 +112,7 @@ function enriquecerPersonaAsistenciaLimpieza(autor = '') {
     const persona = resolverPersonaMarcador(autor);
     if (!persona) {
         return {
+            esReconocida: false,
             autorCanonico: autor || 'Sin nombre',
             personaKey: construirClavePersonaFallback(autor),
             turno: null,
@@ -121,11 +122,72 @@ function enriquecerPersonaAsistenciaLimpieza(autor = '') {
 
     const horarioTurno = extraerHorarioTurno(persona.turno || '');
     return {
+        esReconocida: true,
         autorCanonico: persona.nombre,
         personaKey: persona.key,
         turno: persona.turno || null,
         horario: horarioTurno ? `${horarioTurno.turnoInicio}-${horarioTurno.turnoFin}` : null
     };
+}
+
+function hhmmAMinutos(hhmm = '') {
+    const [hh, mm] = String(hhmm || '').split(':').map((v) => Number.parseInt(v, 10));
+    if (Number.isNaN(hh) || Number.isNaN(mm)) {
+        return null;
+    }
+
+    return (hh * 60) + mm;
+}
+
+function obtenerFechaOperativaTurno({ turno, fecha }) {
+    const horario = extraerHorarioTurno(turno || '');
+    if (!horario || !fecha) {
+        return fecha ? fecha.format('YYYY-MM-DD') : null;
+    }
+
+    const inicio = hhmmAMinutos(horario.turnoInicio);
+    const fin = hhmmAMinutos(horario.turnoFin);
+    const minutoActual = hhmmAMinutos(fecha.format('HH:mm'));
+
+    if (inicio === null || fin === null || minutoActual === null) {
+        return fecha.format('YYYY-MM-DD');
+    }
+
+    const cruzaMedianoche = inicio > fin;
+    if (!cruzaMedianoche) {
+        return fecha.format('YYYY-MM-DD');
+    }
+
+    if (minutoActual < fin) {
+        return fecha.clone().subtract(1, 'day').format('YYYY-MM-DD');
+    }
+
+    return fecha.format('YYYY-MM-DD');
+}
+
+function estaEnHorarioTurno({ turno, fecha }) {
+    const horario = extraerHorarioTurno(turno || '');
+    if (!horario || !fecha) {
+        return false;
+    }
+
+    const minutoActual = hhmmAMinutos(fecha.format('HH:mm'));
+    const inicio = hhmmAMinutos(horario.turnoInicio);
+    const fin = hhmmAMinutos(horario.turnoFin);
+
+    if (minutoActual === null || inicio === null || fin === null) {
+        return false;
+    }
+
+    if (inicio < fin) {
+        return minutoActual >= inicio && minutoActual < fin;
+    }
+
+    if (inicio > fin) {
+        return minutoActual >= inicio || minutoActual < fin;
+    }
+
+    return false;
 }
 
 async function resolverAutorPersistente({ fechaDia, grupo, autorCanonico, personaKey }) {
@@ -196,8 +258,23 @@ async function registrarAsistenciaLimpieza({
     }
 
     const persona = enriquecerPersonaAsistenciaLimpieza(autor || 'Sin nombre');
+
+    // Asistencia SOLO por primera evidencia enviada dentro del horario del turno.
+    // Si no hay evidencia valida en turno, se considera falta y no se registra asistencia.
+    if (!persona.esReconocida) {
+        return null;
+    }
+
+    if (evidenciasIncremento <= 0) {
+        return null;
+    }
+
+    if (!estaEnHorarioTurno({ turno: persona.turno, fecha })) {
+        return null;
+    }
+
     const ts = fecha.format('YYYY-MM-DD HH:mm:ss');
-    const fechaDia = fecha.format('YYYY-MM-DD');
+    const fechaDia = obtenerFechaOperativaTurno({ turno: persona.turno, fecha });
     const autorPersistente = await resolverAutorPersistente({
         fechaDia,
         grupo,
@@ -205,8 +282,8 @@ async function registrarAsistenciaLimpieza({
         personaKey: persona.personaKey
     });
 
-    const reporteBandera = reportesIncremento > 0 ? 1 : 0;
-    const evidenciaBandera = evidenciasIncremento > 0 ? 1 : 0;
+    const reporteBandera = 1;
+    const evidenciaBandera = 1;
 
     const resultado = await pool.query(
         `
@@ -265,5 +342,7 @@ module.exports = {
     registrarAsistenciaLimpieza,
     obtenerAutoresExcluidosAsistencia,
     obtenerAutoresPermitidosPorGrupo,
-    autorPermitidoPorGrupo
+    autorPermitidoPorGrupo,
+    estaEnHorarioTurno,
+    obtenerFechaOperativaTurno
 };

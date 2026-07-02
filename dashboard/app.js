@@ -2,14 +2,17 @@ const state = {
     tab: 'principal',
     scope: 'pendientes',
     limpiezaView: 'actividades',
-    asistenciaScope: 'diaria',
-    supervisorAsistenciaScope: 'diaria',
+    asistenciaScope: 'marcador',
+    supervisorAsistenciaScope: 'marcador',
     page: 1,
     pageSize: 20,
     totalPages: 1,
     modalImages: [],
     modalIndex: 0
 };
+
+const DASHBOARD_KEY_QUERY_PARAM = 'key';
+const DASHBOARD_KEY_STORAGE = 'dashboardPrivateKey';
 
 const els = {
     listado: document.getElementById('listado'),
@@ -48,10 +51,134 @@ const els = {
     kpiProyectos: document.getElementById('kpi-proyectos')
 };
 
+function getDashboardKeyFromUrl() {
+    const params = new URLSearchParams(window.location.search || '');
+    return (params.get(DASHBOARD_KEY_QUERY_PARAM) || '').trim();
+}
+
+function persistDashboardKey(key = '') {
+    const clean = (key || '').trim();
+    if (!clean) {
+        return;
+    }
+
+    window.localStorage.setItem(DASHBOARD_KEY_STORAGE, clean);
+}
+
+function getDashboardKey() {
+    const fromUrl = getDashboardKeyFromUrl();
+    if (fromUrl) {
+        persistDashboardKey(fromUrl);
+        const cleanUrl = `${window.location.origin}${window.location.pathname}${window.location.hash || ''}`;
+        window.history.replaceState({}, document.title, cleanUrl);
+        return fromUrl;
+    }
+
+    return (window.localStorage.getItem(DASHBOARD_KEY_STORAGE) || '').trim();
+}
+
+async function apiFetch(url, options = {}) {
+    const headers = new Headers(options.headers || {});
+    const key = getDashboardKey();
+    if (key) {
+        headers.set('x-dashboard-key', key);
+    }
+
+    const response = await fetch(url, {
+        ...options,
+        headers
+    });
+
+    if (response.status === 403) {
+        throw new Error('Acceso denegado (403). Conéctate por Tailscale o abre el dashboard con ?key=TU_LLAVE.');
+    }
+
+    return response;
+}
+
 function toIsoOrEmpty(value) {
     if (!value) return '';
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? '' : date.toISOString();
+}
+
+function getMxTodayIso() {
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Mexico_City',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).formatToParts(new Date());
+
+    const year = parts.find((p) => p.type === 'year')?.value;
+    const month = parts.find((p) => p.type === 'month')?.value;
+    const day = parts.find((p) => p.type === 'day')?.value;
+
+    return `${year}-${month}-${day}`;
+}
+
+function parseIsoDateUtcNoon(value) {
+    const [year, month, day] = String(value || '').split('-').map((part) => Number.parseInt(part, 10));
+    if (!year || !month || !day) {
+        return null;
+    }
+
+    return new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+}
+
+function formatIsoDate(date) {
+    return date.toISOString().slice(0, 10);
+}
+
+function getWeekRangeMx() {
+    const todayIso = getMxTodayIso();
+    const today = parseIsoDateUtcNoon(todayIso);
+    if (!today) {
+        return { from: todayIso, to: todayIso, weekStart: todayIso, weekEnd: todayIso };
+    }
+
+    const dayIndex = (today.getUTCDay() + 6) % 7;
+    const weekStart = new Date(today);
+    weekStart.setUTCDate(today.getUTCDate() - dayIndex);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setUTCDate(weekStart.getUTCDate() + 6);
+
+    return {
+        from: formatIsoDate(weekStart),
+        to: formatIsoDate(weekEnd),
+        weekStart: formatIsoDate(weekStart),
+        weekEnd: formatIsoDate(weekEnd)
+    };
+}
+
+function getMonthRangeMx() {
+    const todayIso = getMxTodayIso();
+    const today = parseIsoDateUtcNoon(todayIso);
+    if (!today) {
+        return { from: todayIso, to: todayIso, month: todayIso.slice(0, 7) };
+    }
+
+    const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1, 12, 0, 0));
+    const monthEnd = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0, 12, 0, 0));
+
+    return {
+        from: formatIsoDate(monthStart),
+        to: formatIsoDate(monthEnd),
+        month: `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, '0')}`
+    };
+}
+
+function getDefaultAttendanceRange(scope) {
+    if (scope === 'semanal') {
+        return getWeekRangeMx();
+    }
+
+    if (scope === 'mensual') {
+        return getMonthRangeMx();
+    }
+
+    const today = getMxTodayIso();
+    return { from: today, to: today, weekStart: today, weekEnd: today, month: today.slice(0, 7) };
 }
 
 function parseDashboardDate(value) {
@@ -150,6 +277,47 @@ function buildParams() {
         if (state.scope === 'proyectos') params.set('estado', extra);
     }
 
+    const hasCustomRange = Boolean(els.filterFrom.value || els.filterTo.value);
+    const defaultRange = getDefaultAttendanceRange(
+        state.tab === 'supervisor' && state.scope === 'asistencia'
+            ? state.supervisorAsistenciaScope
+            : state.tab === 'limpieza' && state.limpiezaView === 'asistencia'
+                ? state.asistenciaScope
+                : ''
+    );
+
+    if (!hasCustomRange) {
+        if (state.tab === 'supervisor' && state.scope === 'asistencia') {
+            if (state.supervisorAsistenciaScope === 'mensual') {
+                params.set('month', defaultRange.month);
+            } else if (state.supervisorAsistenciaScope === 'semanal') {
+                params.set('weekStart', defaultRange.weekStart);
+            } else if (state.supervisorAsistenciaScope === 'marcador') {
+                params.set('weekStart', defaultRange.weekStart);
+            } else {
+                params.set('from', defaultRange.from);
+                params.set('to', defaultRange.to);
+            }
+        }
+
+        if (state.tab === 'limpieza' && state.limpiezaView === 'asistencia') {
+            if (state.asistenciaScope === 'mensual') {
+                params.set('from', defaultRange.from);
+                params.set('to', defaultRange.to);
+                params.set('month', defaultRange.month);
+            } else if (state.asistenciaScope === 'semanal') {
+                params.set('from', defaultRange.from);
+                params.set('to', defaultRange.to);
+                params.set('weekStart', defaultRange.weekStart);
+            } else if (state.asistenciaScope === 'marcador') {
+                params.set('weekStart', defaultRange.weekStart);
+            } else {
+                params.set('from', defaultRange.from);
+                params.set('to', defaultRange.to);
+            }
+        }
+    }
+
     return params;
 }
 
@@ -166,12 +334,20 @@ function getEndpoint() {
             return '/api/v1/ingenieria/asistencia-semanal';
         }
 
+        if (state.supervisorAsistenciaScope === 'marcador') {
+            return '/api/v1/ingenieria/asistencia-marcador';
+        }
+
         return '/api/v1/ingenieria/asistencia-hoy';
     }
 
     if (state.tab === 'limpieza') {
         if (state.limpiezaView === 'actividades') {
             return '/api/v1/limpieza/actividades';
+        }
+
+        if (state.asistenciaScope === 'mensual') {
+            return '/api/v1/limpieza/asistencia-mensual';
         }
 
         if (state.asistenciaScope === 'marcador') {
@@ -240,71 +416,57 @@ function turnoIncluyeHora(turno = '', minutoActual = 0) {
     return minutoActual >= inicio || minutoActual < fin;
 }
 
-function construirIndicadorTurnoLimpieza(asistencia = {}) {
-    const hoy = obtenerFechaHoyMxIso();
-    const minutoActual = obtenerMinutosActualesMx();
-    const items = asistencia.items || [];
-
+function construirIndicadorEstadoPersistido(items = [], area = '') {
     const resumen = {
         enTurno: [],
+        salida: [],
         fueraTurno: [],
         descanso: [],
         sinCobertura: true
     };
 
     items.forEach((persona) => {
-        const marcador = persona.marcador || [];
-        const registroHoy = marcador.find((d) => d.fecha === hoy) || marcador[0];
-        if (!registroHoy) return;
+        const nombre = persona.persona || '-';
+        const estado = normalizarTexto((persona.estadoTurno || persona.estado || '').toString());
 
-        const enVentanaTurno = turnoIncluyeHora(persona.turno, minutoActual);
-
-        if (enVentanaTurno) {
-            resumen.sinCobertura = false;
-        }
-
-        if (registroHoy.descanso || registroHoy.estado === 'R') {
-            resumen.descanso.push(persona.persona || '-');
+        if (estado === 'descanso') {
+            resumen.descanso.push(nombre);
             return;
         }
 
-        if (!enVentanaTurno) {
+        resumen.sinCobertura = false;
+
+        if (estado === 'en_turno' || estado === 'enturno') {
+            resumen.enTurno.push(nombre);
             return;
         }
 
-        if (registroHoy.estado === 'A') {
-            resumen.enTurno.push(persona.persona || '-');
+        if (estado === 'salida') {
+            resumen.salida.push(nombre);
             return;
         }
 
-        resumen.fueraTurno.push(persona.persona || '-');
+        resumen.fueraTurno.push(nombre);
     });
+
+    if (area === 'LIMPIEZA' && resumen.enTurno.length === 0 && resumen.salida.length === 0 && resumen.descanso.length === 0) {
+        resumen.sinCobertura = true;
+    }
 
     return resumen;
 }
 
-function construirIndicadorTurnoMantenimiento(asistenciaMtto = {}) {
-    const items = asistenciaMtto.items || [];
-
-    const resumen = {
-        enTurno: [],
-        fueraTurno: [],
-        descanso: []
-    };
-
-    items.forEach((persona) => {
-        if ((persona.estado || 'F') === 'A') {
-            resumen.enTurno.push(persona.persona || '-');
-            return;
-        }
-
-        resumen.fueraTurno.push(persona.persona || '-');
-    });
-
-    return resumen;
+function normalizarTexto(valor = '') {
+    return valor
+        .toString()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
-function renderPrincipalListado({ summary, pendientes, asistenciaLimpieza, asistenciaMtto, preventivos, alertasAsistencia }) {
+function renderPrincipalListado({ summary, pendientes, asistenciaLimpieza, asistenciaMtto, estadoAsistencia, preventivos, alertasAsistencia }) {
     const pendientesAbiertos = (pendientes.items || []).filter((x) => {
         return (x.estado || '').toLowerCase() === 'pendiente';
     }).slice(0, 5);
@@ -322,8 +484,8 @@ function renderPrincipalListado({ summary, pendientes, asistenciaLimpieza, asist
     const topAsistencia = asistenciaCritica[0] || null;
     const preventivosAbiertos = preventivos?.items || [];
     const alertasActivas = alertasAsistencia?.items || [];
-    const indicadorLimpieza = construirIndicadorTurnoLimpieza(asistenciaLimpieza);
-    const indicadorMtto = construirIndicadorTurnoMantenimiento(asistenciaMtto);
+    const indicadorLimpieza = construirIndicadorEstadoPersistido(estadoAsistencia?.limpieza || [], 'LIMPIEZA');
+    const indicadorMtto = construirIndicadorEstadoPersistido(estadoAsistencia?.mantenimiento || [], 'MTTO');
 
     const maxFaltas = asistenciaCritica.length
         ? Math.max(...asistenciaCritica.map((x) => Number(x.faltas || 0)))
@@ -387,15 +549,16 @@ function renderPrincipalListado({ summary, pendientes, asistenciaLimpieza, asist
             </div>
         </div>
 
-        <button class="card home-mini-card home-turno-card home-panel-button" type="button" data-home-tab="supervisor" data-home-scope="asistencia" data-home-supervisor-asistencia-scope="diaria">
+        <button class="card home-mini-card home-turno-card home-panel-button" type="button" data-home-tab="supervisor" data-home-scope="asistencia" data-home-supervisor-asistencia-scope="marcador">
             <h3>Turno | Mantenimiento</h3>
             <div class="home-turno-grid">
                 <div class="home-turno-item ok">En turno: <b>${indicadorMtto.enTurno.length}</b></div>
+                <div class="home-turno-item warn">Salida: <b>${indicadorMtto.salida.length}</b></div>
                 <div class="home-turno-item warn">Fuera de turno: <b>${indicadorMtto.fueraTurno.length}</b></div>
                 <div class="home-turno-item rest">Descanso: <b>${indicadorMtto.descanso.length}</b></div>
             </div>
             <div class="home-mini-line">
-                ${indicadorMtto.enTurno.length ? `Asistencia SHP1 Pachuca: ${indicadorMtto.enTurno.slice(0, 3).join(', ')}` : 'Sin activos con reporte hoy en Asistencia SHP1 Pachuca.'}
+                ${indicadorMtto.enTurno.length ? `Asistencia SHP1 Pachuca: ${indicadorMtto.enTurno.slice(0, 3).join(', ')}` : indicadorMtto.salida.length ? `Salida registrada: ${indicadorMtto.salida.slice(0, 3).join(', ')}` : 'Sin activos con reporte hoy en Asistencia SHP1 Pachuca.'}
             </div>
         </button>
 
@@ -403,15 +566,18 @@ function renderPrincipalListado({ summary, pendientes, asistenciaLimpieza, asist
             <h3>Turno | Limpieza</h3>
             <div class="home-turno-grid">
                 <div class="home-turno-item ok">En turno: <b>${indicadorLimpieza.enTurno.length}</b></div>
-                <div class="home-turno-item warn">Sin registro en turno: <b>${indicadorLimpieza.fueraTurno.length}</b></div>
+                <div class="home-turno-item warn">Salida: <b>${indicadorLimpieza.salida.length}</b></div>
+                <div class="home-turno-item warn">Fuera de turno: <b>${indicadorLimpieza.fueraTurno.length}</b></div>
                 <div class="home-turno-item rest">Descanso: <b>${indicadorLimpieza.descanso.length}</b></div>
             </div>
             <div class="home-mini-line">
-                ${indicadorLimpieza.sinCobertura
-                    ? 'MELI SVC PACHUCA - BATIA LIMPIEZA: sin cobertura programada en esta hora.'
-                    : indicadorLimpieza.enTurno.length
-                        ? `MELI SVC PACHUCA - BATIA LIMPIEZA: ${indicadorLimpieza.enTurno.slice(0, 3).join(', ')}`
-                        : 'MELI SVC PACHUCA - BATIA LIMPIEZA: sin activos con reporte en el turno actual.'}
+                ${indicadorLimpieza.enTurno.length
+                    ? `MELI SVC PACHUCA - BATIA LIMPIEZA: ${indicadorLimpieza.enTurno.slice(0, 3).join(', ')}`
+                    : indicadorLimpieza.salida.length
+                        ? `MELI SVC PACHUCA - BATIA LIMPIEZA: salida registrada ${indicadorLimpieza.salida.slice(0, 3).join(', ')}`
+                        : indicadorLimpieza.descanso.length
+                            ? `MELI SVC PACHUCA - BATIA LIMPIEZA: descanso programado ${indicadorLimpieza.descanso.slice(0, 3).join(', ')}`
+                            : 'MELI SVC PACHUCA - BATIA LIMPIEZA: sin activos con reporte en el turno actual.'}
             </div>
         </button>
 
@@ -456,9 +622,9 @@ function renderPrincipalListado({ summary, pendientes, asistenciaLimpieza, asist
             <div class="home-mini-line">${topPendiente ? `#${topPendiente.id} · ${topPendiente.area || '-'} · ${topPendiente.prioridad || '-'}` : 'Sin pendientes abiertos relevantes.'}</div>
         </button>
 
-        <button class="card home-mini-card home-panel-button" type="button" data-home-tab="limpieza" data-home-limpieza-view="asistencia" data-home-asistencia-scope="semanal">
+        <button class="card home-mini-card home-panel-button" type="button" data-home-tab="limpieza" data-home-limpieza-view="asistencia" data-home-asistencia-scope="marcador">
             <h3>Asistencia crítica</h3>
-            <div class="home-mini-line">${topAsistencia ? `${topAsistencia.persona || '-'} · ${topAsistencia.turno || '-'} · ${topAsistencia.faltas} faltas` : 'Sin datos semanales de asistencia.'}</div>
+            <div class="home-mini-line">${topAsistencia ? `${topAsistencia.persona || '-'} · ${topAsistencia.turno || '-'} · ${topAsistencia.faltas} faltas` : 'Sin datos de asistencia.'}</div>
         </button>
 
         <button class="card home-mini-card home-panel-button" type="button" data-home-tab="supervisor" data-home-scope="materiales">
@@ -481,7 +647,7 @@ function renderIngenieriaAsistenciaCard(ingenieria) {
     const listado = items.length
         ? items.map((x) => `
             <li>
-                <span class="asistencia-chip ${x.estado === 'A' ? 'estado-a' : 'estado-f'}">${x.estado}</span>
+                <span class="asistencia-chip ${x.estado === 'A' ? 'estado-a' : (x.estado === 'R' ? 'estado-r' : (x.estado === 'D' ? 'estado-d' : 'estado-f'))}">${x.estado}</span>
                 ${x.persona || '-'} | ${x.puesto || '-'} | ${x.turno || '-'}
             </li>
         `).join('')
@@ -507,16 +673,13 @@ function renderSupervisorAsistenciaListado(data) {
             ? `Semana ${formatFechaCorta(data.weekStart)} - ${formatFechaCorta(data.weekEnd)}`
             : `Dia ${formatFechaCorta(data.fecha)}`;
 
-    const resumen = items.reduce((acc, x) => {
-        acc.total += 1;
-        if (x.estado === 'A') acc.asistio += 1;
-        else acc.falto += 1;
-        return acc;
-    }, { total: 0, asistio: 0, falto: 0 });
-
     const rows = items.map((x) => {
-        const estadoClass = x.estado === 'A' ? 'estado-a' : 'estado-f';
-        const estadoLabel = x.estado === 'A' ? 'Asistencia registrada' : 'Sin asistencia';
+        const estadoClass = x.estado === 'A' ? 'estado-a' : (x.estado === 'R' ? 'estado-r' : 'estado-f');
+        const estadoLabel = x.estado === 'A'
+            ? 'Asistencia en tiempo'
+            : x.estado === 'R'
+                ? 'Retardo de asistencia'
+                : 'Sin asistencia';
 
         return `
             <div class="asistencia-row">
@@ -533,14 +696,16 @@ function renderSupervisorAsistenciaListado(data) {
     }).join('');
 
     const totalA = items.filter((x) => x.estado === 'A').length;
+    const totalR = items.filter((x) => x.estado === 'R').length;
     const totalF = items.filter((x) => x.estado === 'F').length;
 
     return `
         <div class="asistencia-legend">
-            <span class="asistencia-chip estado-a">A</span> Asistencia registrada
-            <span class="asistencia-chip estado-f">F</span> Sin asistencia
+            <span class="asistencia-chip estado-a">A</span> Asistencia
+            <span class="asistencia-chip estado-r">R</span> Retardo
+            <span class="asistencia-chip estado-f">F</span> Falta
         </div>
-        <div class="status">${periodLabel} | Con asistencia: ${totalA} | Sin asistencia: ${totalF}</div>
+        <div class="status">${periodLabel} | A: ${totalA} | R: ${totalR} | F: ${totalF}</div>
         <section class="asistencia-day">
             <h3>Ingenieria de Planta | Asistencia ${periodLabel}</h3>
             <div class="asistencia-row asistencia-head">
@@ -553,6 +718,76 @@ function renderSupervisorAsistenciaListado(data) {
             </div>
             ${rows}
         </section>
+    `;
+}
+
+function renderSupervisorAsistenciaMarcadorListado(data) {
+    const items = data?.items || [];
+    const days = data?.days || [];
+
+    if (!items.length) {
+        return '';
+    }
+
+    const headDias = days.map((day) => `<th class="fecha-col">${formatDiaCabecera(day)}</th>`).join('');
+
+    const bodyRows = items.map((item) => {
+        const dias = (item.marcador || []).map((dia) => {
+            const className = dia.estado === 'A' ? 'estado-a' : (dia.estado === 'D' ? 'estado-d' : (dia.estado === 'R' ? 'estado-r' : 'estado-f'));
+            const tooltip = dia.estado === 'A'
+                ? `Asistencia en tiempo (${dia.total_reportes || 0} reportes)`
+                : dia.estado === 'D'
+                    ? 'Descanso programado'
+                    : dia.estado === 'R'
+                        ? 'Retardo de asistencia (> 1 hora)'
+                        : 'Falta';
+
+            return `
+                <td>
+                    <span class="asistencia-chip ${className}" title="${tooltip}">${dia.estado}</span>
+                </td>
+            `;
+        }).join('');
+
+        return `
+            <tr>
+                <td class="persona-col">${item.persona || '-'}</td>
+                <td class="turno-col">${item.turno || '-'}</td>
+                ${dias}
+                <td class="tot-col">${item.totales?.A ?? 0}</td>
+                <td class="tot-col">${item.totales?.D ?? 0}</td>
+                <td class="tot-col">${item.totales?.R ?? 0}</td>
+                <td class="tot-col">${item.totales?.F ?? 0}</td>
+            </tr>
+        `;
+    }).join('');
+
+    return `
+        <div class="asistencia-legend">
+            <span class="asistencia-chip estado-a">A</span> Asistencia
+            <span class="asistencia-chip estado-d">D</span> Descanso
+            <span class="asistencia-chip estado-r">R</span> Retardo
+            <span class="asistencia-chip estado-f">F</span> Falta
+        </div>
+        <div class="status">Semana: ${formatFechaCorta(data.weekStart)} - ${formatFechaCorta(data.weekEnd)}</div>
+        <div class="marcador-wrap">
+            <table class="marcador-table">
+                <thead>
+                    <tr>
+                        <th class="persona-col">Persona</th>
+                        <th class="turno-col">Turno</th>
+                        ${headDias}
+                        <th>A</th>
+                        <th>D</th>
+                        <th>R</th>
+                        <th>F</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${bodyRows}
+                </tbody>
+            </table>
+        </div>
     `;
 }
 
@@ -598,29 +833,31 @@ function renderAlertasAsistenciaListado(data) {
 }
 
 async function cargarVistaPrincipal() {
-    const [summaryResp, pendientesResp, asistenciaLimpiezaResp, asistenciaMttoResp, preventivosResp, alertasResp] = await Promise.all([
-        fetch('/api/v1/summary'),
-        fetch('/api/v1/supervisor/pendientes?page=1&pageSize=25'),
-        fetch('/api/v1/limpieza/asistencia-marcador?page=1&pageSize=50'),
-        fetch('/api/v1/ingenieria/asistencia-hoy?page=1&pageSize=50'),
-        fetch('/api/v1/supervisor/preventivos?page=1&pageSize=10'),
-        fetch('/api/v1/supervisor/asistencia-alertas?page=1&pageSize=50')
+    const [summaryResp, pendientesResp, asistenciaLimpiezaResp, asistenciaMttoResp, estadoAsistenciaResp, preventivosResp, alertasResp] = await Promise.all([
+        apiFetch('/api/v1/summary'),
+        apiFetch('/api/v1/supervisor/pendientes?page=1&pageSize=25'),
+        apiFetch('/api/v1/limpieza/asistencia-marcador?page=1&pageSize=50'),
+        apiFetch('/api/v1/ingenieria/asistencia-hoy?page=1&pageSize=50'),
+        apiFetch('/api/v1/asistencia/estado-hoy'),
+        apiFetch('/api/v1/supervisor/preventivos?page=1&pageSize=10'),
+        apiFetch('/api/v1/supervisor/asistencia-alertas?page=1&pageSize=50')
     ]);
 
-    if (!summaryResp.ok || !pendientesResp.ok || !asistenciaLimpiezaResp.ok || !asistenciaMttoResp.ok || !preventivosResp.ok || !alertasResp.ok) {
+    if (!summaryResp.ok || !pendientesResp.ok || !asistenciaLimpiezaResp.ok || !asistenciaMttoResp.ok || !estadoAsistenciaResp.ok || !preventivosResp.ok || !alertasResp.ok) {
         throw new Error('No se pudo cargar la vista principal');
     }
 
-    const [summary, pendientes, asistenciaLimpieza, asistenciaMtto, preventivos, alertasAsistencia] = await Promise.all([
+    const [summary, pendientes, asistenciaLimpieza, asistenciaMtto, estadoAsistencia, preventivos, alertasAsistencia] = await Promise.all([
         summaryResp.json(),
         pendientesResp.json(),
         asistenciaLimpiezaResp.json(),
         asistenciaMttoResp.json(),
+        estadoAsistenciaResp.json(),
         preventivosResp.json(),
         alertasResp.json()
     ]);
 
-    els.listado.innerHTML = renderPrincipalListado({ summary, pendientes, asistenciaLimpieza, asistenciaMtto, preventivos, alertasAsistencia });
+    els.listado.innerHTML = renderPrincipalListado({ summary, pendientes, asistenciaLimpieza, asistenciaMtto, estadoAsistencia, preventivos, alertasAsistencia });
     els.status.textContent = 'Vista principal actualizada.';
     els.pageInfo.textContent = 'Principal';
 }
@@ -745,8 +982,70 @@ function renderAsistenciaSemanalListado(items) {
     `;
 }
 
+function renderAsistenciaAgrupadaListado(data) {
+    const items = data?.items || [];
+    if (!items.length) {
+        return '';
+    }
+
+    const isMonthly = data.periodo === 'mensual' || Boolean(data.month);
+    const rangeStart = data.weekStart || data.monthStart || data.periodoInicio || data.periodo_inicio || data.from || '-';
+    const rangeEnd = data.weekEnd || data.monthEnd || data.periodoFin || data.periodo_fin || data.to || '-';
+    const title = isMonthly ? 'Mes' : 'Semana';
+    const startLabel = formatFechaCorta(rangeStart);
+    const endLabel = formatFechaCorta(rangeEnd);
+
+    const bloques = items.map((item) => {
+        const dias = Number(item.dias_con_asistencia || 0);
+        const estado = dias >= 6
+            ? { code: 'A', label: 'Asistencia alta', className: 'estado-a' }
+            : dias >= 3
+                ? { code: 'R', label: 'Asistencia media', className: 'estado-r' }
+                : { code: 'F', label: 'Asistencia baja', className: 'estado-f' };
+
+        const periodoInicio = item.semana_inicio || item.mes_inicio || item.periodo_inicio || item.periodoInicio || rangeStart;
+        const periodoFin = item.semana_fin || item.mes_fin || item.periodo_fin || item.periodoFin || rangeEnd;
+        const ultimoPeriodo = item.ultimo_reporte_semana || item.ultimo_reporte_mes || item.ultimo_reporte_periodo || item.ultimo_reporte;
+
+        return `
+            <section class="asistencia-day">
+                <h3>${item.autor || '-'} | ${title} ${formatFechaCorta(periodoInicio)} - ${formatFechaCorta(periodoFin)}</h3>
+                <div class="asistencia-row asistencia-head">
+                    <div class="asistencia-col persona">Elemento</div>
+                    <div class="asistencia-col estado">Estado</div>
+                    <div class="asistencia-col numero">Dias</div>
+                    <div class="asistencia-col numero">Reportes</div>
+                    <div class="asistencia-col numero">Evidencias</div>
+                    <div class="asistencia-col hora">Ultimo registro</div>
+                </div>
+                <div class="asistencia-row">
+                    <div class="asistencia-col persona">${item.autor || '-'}</div>
+                    <div class="asistencia-col estado">
+                        <span class="asistencia-chip ${estado.className}" title="${estado.label}">${estado.code}</span>
+                    </div>
+                    <div class="asistencia-col numero">${dias}</div>
+                    <div class="asistencia-col numero">${item.total_reportes ?? 0}</div>
+                    <div class="asistencia-col numero">${item.total_evidencias ?? 0}</div>
+                    <div class="asistencia-col hora">${formatFecha(ultimoPeriodo)}</div>
+                </div>
+            </section>
+        `;
+    }).join('');
+
+    return `
+        <div class="asistencia-legend">
+            <span class="asistencia-chip estado-a">A</span> 6+ dias
+            <span class="asistencia-chip estado-r">R</span> 3-5 dias
+            <span class="asistencia-chip estado-f">F</span> 0-2 dias
+        </div>
+        <div class="status">${title}: ${startLabel} - ${endLabel}</div>
+        ${bloques}
+    `;
+}
+
 function classByEstado(estado) {
     if (estado === 'A') return 'estado-a';
+    if (estado === 'D') return 'estado-d';
     if (estado === 'R') return 'estado-r';
     return 'estado-f';
 }
@@ -766,11 +1065,13 @@ function renderAsistenciaMarcadorListado(data) {
     const bodyRows = items.map((item) => {
         const dias = (item.marcador || []).map((dia) => {
             const className = classByEstado(dia.estado);
-            const tooltip = dia.descanso
+            const tooltip = dia.estado === 'D'
                 ? 'Descanso programado'
                 : dia.estado === 'A'
-                    ? `Asistencia OK (${dia.total_reportes || 0} reportes)`
-                    : 'Falta sin descanso';
+                    ? `Asistencia en tiempo (${dia.total_reportes || 0} reportes)`
+                    : dia.estado === 'R'
+                        ? 'Retardo de asistencia (> 1 hora sin evidencia)'
+                        : 'Falta';
 
             return `
                 <td>
@@ -785,6 +1086,7 @@ function renderAsistenciaMarcadorListado(data) {
                 <td class="turno-col">${item.turno || '-'}</td>
                 ${dias}
                 <td class="tot-col">${item.totales?.A ?? 0}</td>
+                <td class="tot-col">${item.totales?.D ?? 0}</td>
                 <td class="tot-col">${item.totales?.R ?? 0}</td>
                 <td class="tot-col">${item.totales?.F ?? 0}</td>
             </tr>
@@ -793,8 +1095,9 @@ function renderAsistenciaMarcadorListado(data) {
 
     return `
         <div class="asistencia-legend">
-            <span class="asistencia-chip estado-a">A</span> Asistio
-            <span class="asistencia-chip estado-r">R</span> Descanso programado
+            <span class="asistencia-chip estado-a">A</span> Asistencia
+            <span class="asistencia-chip estado-d">D</span> Descanso
+            <span class="asistencia-chip estado-r">R</span> Retardo
             <span class="asistencia-chip estado-f">F</span> Falta
         </div>
         <div class="status">Semana: ${formatFechaCorta(data.weekStart)} - ${formatFechaCorta(data.weekEnd)}</div>
@@ -806,6 +1109,7 @@ function renderAsistenciaMarcadorListado(data) {
                         <th class="turno-col">Turno</th>
                         ${headDias}
                         <th>A</th>
+                        <th>D</th>
                         <th>R</th>
                         <th>F</th>
                     </tr>
@@ -943,7 +1247,7 @@ ${item.observaciones || 'Sin observaciones'}</div>
 
 async function cargarResumen() {
     try {
-        const resp = await fetch('/api/v1/summary');
+        const resp = await apiFetch('/api/v1/summary');
         const data = await resp.json();
 
         els.kpiBitacora.textContent = data.bitacora ?? '-';
@@ -968,7 +1272,7 @@ async function cargarListado() {
         const endpoint = getEndpoint();
         const params = buildParams();
 
-        const resp = await fetch(`${endpoint}?${params.toString()}`);
+        const resp = await apiFetch(`${endpoint}?${params.toString()}`);
         if (!resp.ok) {
             throw new Error(`HTTP ${resp.status}`);
         }
@@ -978,8 +1282,8 @@ async function cargarListado() {
         state.page = Math.min(state.page, state.totalPages);
 
         if (state.tab === 'limpieza' && state.limpiezaView === 'asistencia') {
-            if (state.asistenciaScope === 'semanal') {
-                els.listado.innerHTML = renderAsistenciaSemanalListado(data.items || []);
+            if (state.asistenciaScope === 'semanal' || state.asistenciaScope === 'mensual') {
+                els.listado.innerHTML = renderAsistenciaAgrupadaListado(data);
             } else if (state.asistenciaScope === 'marcador') {
                 els.listado.innerHTML = renderAsistenciaMarcadorListado(data);
             } else {
@@ -988,7 +1292,9 @@ async function cargarListado() {
         } else if (state.tab === 'supervisor' && state.scope === 'alertas') {
             els.listado.innerHTML = renderAlertasAsistenciaListado(data);
         } else if (state.tab === 'supervisor' && state.scope === 'asistencia') {
-            els.listado.innerHTML = renderSupervisorAsistenciaListado(data);
+            els.listado.innerHTML = state.supervisorAsistenciaScope === 'marcador'
+                ? renderSupervisorAsistenciaMarcadorListado(data)
+                : renderSupervisorAsistenciaListado(data);
         } else if (state.tab === 'supervisor' && state.scope === 'bitacora') {
             const items = data.items || [];
             els.listado.innerHTML = `
@@ -1054,7 +1360,7 @@ async function conectarEventosEvidencias() {
                 return;
             }
 
-            const r = await fetch(`/api/v1/bitacora/actividades/${id}/evidencias`);
+            const r = await apiFetch(`/api/v1/bitacora/actividades/${id}/evidencias`);
             const evidencias = await r.json();
             const urls = evidencias.map((x) => toPublicImageUrl(x.ruta));
 
@@ -1081,7 +1387,7 @@ async function conectarEventosEvidencias() {
                 return;
             }
 
-            const r = await fetch(`/api/v1/limpieza/actividades/${id}/evidencias`);
+            const r = await apiFetch(`/api/v1/limpieza/actividades/${id}/evidencias`);
             const evidencias = await r.json();
             const urls = evidencias.map((x) => toPublicImageUrl(x.ruta));
 
@@ -1108,7 +1414,7 @@ async function conectarEventosEvidencias() {
                 return;
             }
 
-            const r = await fetch(`/api/v1/supervisor/pendientes/${id}/evidencias`);
+            const r = await apiFetch(`/api/v1/supervisor/pendientes/${id}/evidencias`);
             const evidencias = await r.json();
             const urls = evidencias.map((x) => toPublicImageUrl(x.ruta));
 
@@ -1135,7 +1441,7 @@ async function conectarEventosEvidencias() {
                 return;
             }
 
-            const r = await fetch(`/api/v1/supervisor/materiales/${id}/evidencias`);
+            const r = await apiFetch(`/api/v1/supervisor/materiales/${id}/evidencias`);
             const evidencias = await r.json();
             const urls = evidencias.map((x) => toPublicImageUrl(x.ruta));
 
@@ -1162,7 +1468,7 @@ async function conectarEventosEvidencias() {
                 return;
             }
 
-            const r = await fetch(`/api/v1/supervisor/proyectos/${id}/evidencias`);
+            const r = await apiFetch(`/api/v1/supervisor/proyectos/${id}/evidencias`);
             const evidencias = await r.json();
             const urls = evidencias.map((x) => toPublicImageUrl(x.ruta));
 

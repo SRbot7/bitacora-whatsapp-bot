@@ -38,6 +38,7 @@ const {
 const { logPersistencia } = require('../lib/persistence-log');
 const {
     obtenerAlertasAsistenciaLimpieza,
+    obtenerAlertasAsistenciaIngenieria,
     obtenerEstadoTurnoLimpieza
 } = require('../services/alertas-asistencia');
 const {
@@ -60,12 +61,15 @@ const COMANDOS = [
     'AYUDA', 'AYUDA PENDIENTES', 'AYUDA MATERIALES',
     'AYUDA INSUMOS', 'AYUDA PROYECTOS', 'AYUDA EVIDENCIAS',
     'AYUDA PREVENTIVOS', 'AYUDA ALERTAS', 'AYUDA HISTORICO',
+    'AYUDA CENTRO', 'AYUDA CENTRO OPERATIVO', 'AYUDA PERMISOS',
     'AYUDA GUIADA', 'GUIA AYUDA', 'AYUDA RAPIDA',
+    'PERMISOS', 'PERMISOS CENTRO',
     'REPORTE', 'RESUMEN', 'REPORTE OPERATIVO', 'RESUMEN OPERATIVO',
     'LISTAR', 'ABIERTOS', 'CERRADOS', 'COMPLETADOS', 'HISTORICO', 'LISTAR CERRADOS',
     'PREVENTIVOS', 'LISTAR PREVENTIVOS', 'PREVENTIVOS CERRADOS', 'LISTAR PREVENTIVOS CERRADOS', 'HISTORICO PREVENTIVOS',
     'ALERTAS', 'ALERTAS ASISTENCIA',
     'ASISTENCIA', 'ASISTENCIA HOY', 'EN TURNO', 'EN SITIO',
+    'RESUMEN ASISTENCIA', 'MARCADOR', 'MARCADOR ASISTENCIA',
     'RIESGOS', 'MATERIALES', 'PROYECTOS'
 ];
 
@@ -1317,13 +1321,57 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
     if (desc === 'AYUDA') {
         await message.reply(`🤖 CENTRO OPERATIVO SHP1
 
-    AYUDA RÁPIDA
-    • AYUDA GUIADA (recomendada)
-    • GUIA PENDIENTE | GUIA MATERIAL | GUIA PROYECTO
-    • LISTAR | ABIERTOS | CERRADOS | COMPLETADOS
-    • MATERIALES | PROYECTOS | RIESGOS
+AYUDA RÁPIDA
+• AYUDA GUIADA (recomendada)
+• GUIA PENDIENTE | GUIA MATERIAL | GUIA PROYECTO
+• LISTAR | ABIERTOS | CERRADOS | COMPLETADOS
+• PREVENTIVOS | PREVENTIVOS CERRADOS | CERRAR PREVENTIVO <ID>
+• MATERIALES | PROYECTOS | RIESGOS
+• ASISTENCIA | ASISTENCIA HOY | EN TURNO | MARCADOR
+• ALERTAS | ALERTAS ASISTENCIA
+• REPORTE | RESUMEN OPERATIVO
+• PERMISOS (qué está habilitado en Centro Operativo)
+• BOT STATUS | BOT STOP | BOT START | BOT RESET
 
-    Escribe AYUDA GUIADA para resolver dudas paso a paso.`);
+Ayudas detalladas:
+• AYUDA PENDIENTES
+• AYUDA MATERIALES
+• AYUDA PROYECTOS
+• AYUDA EVIDENCIAS
+• AYUDA PREVENTIVOS
+• AYUDA ALERTAS
+• AYUDA PERMISOS
+
+Escribe AYUDA GUIADA para resolver dudas paso a paso.`);
+        return;
+    }
+
+    if (
+        desc === 'PERMISOS' ||
+        desc === 'PERMISOS CENTRO' ||
+        desc === 'AYUDA PERMISOS' ||
+        desc === 'AYUDA CENTRO' ||
+        desc === 'AYUDA CENTRO OPERATIVO'
+    ) {
+        await message.reply(`🔐 PERMISOS | CENTRO OPERATIVO SHP1
+
+✅ HABILITADO
+• Registro guiado: pendientes, materiales e insumos, proyectos.
+• Registro libre: PENDIENTE:, MATERIAL:, PROYECTO:.
+• Cierre: CERRAR <ID> y CERRAR PREVENTIVO <ID>.
+• Consultas: LISTAR, ABIERTOS, CERRADOS, COMPLETADOS, HISTORICO.
+• Preventivos: LISTAR PREVENTIVOS, PREVENTIVOS CERRADOS.
+• Asistencia: ASISTENCIA, ASISTENCIA HOY, EN TURNO, MARCADOR, RESUMEN ASISTENCIA.
+• Alertas: ALERTAS, ALERTAS ASISTENCIA.
+• Reporte: REPORTE, RESUMEN OPERATIVO.
+• Evidencias: fotos ligadas al último registro del autor.
+
+🚫 RESTRINGIDO
+• Responder automáticamente en grupos fuera de alcance.
+• Operaciones sobre grupos bloqueados por configuración.
+
+ℹ️ Comando de referencia:
+AYUDA para ver el menú general de Centro Operativo.`);
         return;
     }
 
@@ -1448,14 +1496,20 @@ Los preventivos se manejan aparte de los pendientes de actividades.`);
     if (desc === 'AYUDA ALERTAS') {
         await message.reply(`🚨 ALERTAS DE ASISTENCIA
 
-ALERTAS — Muestra alertas activas de asistencia de limpieza.
+ALERTAS — Muestra alertas activas de asistencia (ingeniería y limpieza).
 ALERTAS ASISTENCIA — Alias del comando anterior.
 
 Estas alertas se generan cuando el personal en turno no manda evidencia dentro de la tolerancia configurada.`);
         return;
     }
 
-    if (desc === 'ASISTENCIA HOY' || desc === 'EN TURNO') {
+    if (
+        desc === 'ASISTENCIA HOY' ||
+        desc === 'EN TURNO' ||
+        desc === 'RESUMEN ASISTENCIA' ||
+        desc === 'MARCADOR' ||
+        desc === 'MARCADOR ASISTENCIA'
+    ) {
         const [ingenieria, limpieza] = await Promise.all([
             obtenerAsistenciaIngenieriaHoy(),
             obtenerEstadoTurnoLimpieza(pool)
@@ -1760,18 +1814,27 @@ HISTORICO PREVENTIVOS — Alias de preventivos cerrados.`);
     }
 
     if (desc === 'ALERTAS' || desc === 'ALERTAS ASISTENCIA') {
-        const data = await obtenerAlertasAsistenciaLimpieza(pool);
+        const [dataLimpieza, dataIngenieria] = await Promise.all([
+            obtenerAlertasAsistenciaLimpieza(pool),
+            obtenerAlertasAsistenciaIngenieria(pool)
+        ]);
+
+        const items = [
+            ...(dataIngenieria.items || []),
+            ...(dataLimpieza.items || [])
+        ];
+
         let respuesta = '🚨 ALERTAS DE ASISTENCIA\n\n';
 
-        data.items.forEach((item) => {
+        items.forEach((item) => {
             respuesta +=
-                `${item.persona}\n` +
+                `${item.etiqueta || 'OPERATIVA'} | ${item.persona}\n` +
                 `Turno: ${item.turno}\n` +
                 `Atraso: ${item.minutosAtraso} min\n` +
                 `Grupo: ${item.grupo}\n\n`;
         });
 
-        if (data.items.length === 0) {
+        if (items.length === 0) {
             respuesta = '✅ No hay alertas activas de asistencia';
         }
 

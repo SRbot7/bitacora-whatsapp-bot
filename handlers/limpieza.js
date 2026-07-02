@@ -5,17 +5,18 @@ const {
     obtenerUltimaActividadLimpiezaPorAutor,
     obtenerUltimaActividadLimpiezaSinReportePorAutor
 } = require('../services/limpieza');
+const { resolverPersonaMarcador } = require('../services/limpieza-personal');
 const { registrarAsistenciaLimpieza } = require('../services/asistencia-limpieza');
 const { ultimasLimpiezas, claveMemoria } = require('../lib/memoria');
 const { logPersistencia } = require('../lib/persistence-log');
 
 const LIMPIEZA_GROUP_WINDOW_MINUTES = Math.max(
-    5,
-    Number.parseInt(process.env.LIMPIEZA_GROUP_WINDOW_MINUTES || '90', 10) || 90
+    1,
+    Number.parseInt(process.env.LIMPIEZA_GROUP_WINDOW_MINUTES || '30', 10) || 30
 );
 const LIMPIEZA_PLACEHOLDER_WINDOW_MINUTES = Math.max(
     1,
-    Number.parseInt(process.env.LIMPIEZA_PLACEHOLDER_WINDOW_MINUTES || '15', 10) || 15
+    Number.parseInt(process.env.LIMPIEZA_PLACEHOLDER_WINDOW_MINUTES || String(LIMPIEZA_GROUP_WINDOW_MINUTES), 10) || LIMPIEZA_GROUP_WINDOW_MINUTES
 );
 
 
@@ -27,12 +28,21 @@ const LIMPIEZA_PLACEHOLDER_WINDOW_MINUTES = Math.max(
 
 async function manejarLimpieza({ message, chat, textoOriginal, nombreAutor, fecha }) {
 
+    const personaPermitida = resolverPersonaMarcador(nombreAutor);
+    if (!personaPermitida) {
+        console.log('⏭️ LIMPIEZA ignorada: autor fuera del personal permitido =>', nombreAutor);
+        return;
+    }
+
+    const autorCanonico = personaPermitida.nombre;
+
     console.log('\n🧹 LIMPIEZA');
     console.log('Descripción:', textoOriginal);
 
     const fechaArchivo  = fecha.format('YYYY-MM-DD');
     let rutaEvidencia   = '';
     let actividadId     = null;
+    let evidenciaRelacionada = false;
     const descripcion   = (textoOriginal || '').trim();
     const huboReporte   = Boolean(descripcion);
     const huboEvidencia = Boolean(message.hasMedia);
@@ -44,15 +54,26 @@ async function manejarLimpieza({ message, chat, textoOriginal, nombreAutor, fech
 
     if (descripcion) {
 
-        actividadId = await guardarActividadLimpieza({
+        actividadId = await obtenerUltimaActividadLimpiezaPorAutor({
+            autor: autorCanonico,
+            grupo: chat.name,
             fecha,
-            autor:       nombreAutor,
-            area:        'General',
-            descripcion,
-            grupo:       chat.name,
-            tipoMensaje: message.type,
-            mensajeId:   message.id._serialized
+            maxMinutos: LIMPIEZA_GROUP_WINDOW_MINUTES
         });
+
+        if (!actividadId) {
+            actividadId = await guardarActividadLimpieza({
+                fecha,
+                autor:       autorCanonico,
+                area:        'General',
+                descripcion,
+                grupo:       chat.name,
+                tipoMensaje: message.type,
+                mensajeId:   message.id._serialized
+            });
+        } else {
+            console.log('🧠 Actividad de limpieza reutilizada por ventana/autor:', clave, '=>', actividadId);
+        }
 
         if (actividadId) {
             ultimasLimpiezas[clave] = actividadId;
@@ -60,14 +81,14 @@ async function manejarLimpieza({ message, chat, textoOriginal, nombreAutor, fech
             logPersistencia({
                 tabla: 'actividades_limpieza',
                 id: actividadId,
-                autor: nombreAutor,
+                autor: autorCanonico,
                 grupo: chat.name,
                 mensajeId: message.id._serialized
             });
         }
     } else if (message.hasMedia) {
         actividadId = await obtenerUltimaActividadLimpiezaPorAutor({
-            autor: nombreAutor,
+            autor: autorCanonico,
             grupo: chat.name,
             fecha,
             maxMinutos: LIMPIEZA_GROUP_WINDOW_MINUTES
@@ -108,13 +129,14 @@ async function manejarLimpieza({ message, chat, textoOriginal, nombreAutor, fech
             actividadId,
             rutaEvidencia
         });
+        evidenciaRelacionada = true;
 
         console.log('✅ EVIDENCIA RELACIONADA');
     }
 
     if (rutaEvidencia && !actividadId) {
         actividadId = await obtenerUltimaActividadLimpiezaSinReportePorAutor({
-            autor: nombreAutor,
+            autor: autorCanonico,
             grupo: chat.name,
             fecha,
             maxMinutos: LIMPIEZA_PLACEHOLDER_WINDOW_MINUTES
@@ -126,10 +148,19 @@ async function manejarLimpieza({ message, chat, textoOriginal, nombreAutor, fech
         }
     }
 
+    if (rutaEvidencia && actividadId && !evidenciaRelacionada) {
+        await guardarEvidenciaLimpieza({
+            actividadId,
+            rutaEvidencia
+        });
+        evidenciaRelacionada = true;
+        console.log('✅ EVIDENCIA RELACIONADA');
+    }
+
     if (rutaEvidencia && !actividadId) {
         actividadId = await guardarActividadLimpieza({
             fecha,
-            autor:       nombreAutor,
+            autor:       autorCanonico,
             area:        'General',
             descripcion: '[SIN REPORTE] Imagen enviada sin texto.',
             grupo:       chat.name,
@@ -143,7 +174,7 @@ async function manejarLimpieza({ message, chat, textoOriginal, nombreAutor, fech
             logPersistencia({
                 tabla: 'actividades_limpieza',
                 id: actividadId,
-                autor: nombreAutor,
+                autor: autorCanonico,
                 grupo: chat.name,
                 mensajeId: message.id._serialized
             });
@@ -161,7 +192,7 @@ async function manejarLimpieza({ message, chat, textoOriginal, nombreAutor, fech
 
     const idAsistencia = await registrarAsistenciaLimpieza({
         fecha,
-        autor: nombreAutor,
+        autor: autorCanonico,
         grupo: chat.name,
         fuenteRegistro: 'AUTOMATICO',
         reportesIncremento: huboReporte ? 1 : 0,
@@ -172,7 +203,7 @@ async function manejarLimpieza({ message, chat, textoOriginal, nombreAutor, fech
         logPersistencia({
             tabla: 'asistencia_limpieza_diaria',
             id: idAsistencia,
-            autor: nombreAutor,
+            autor: autorCanonico,
             grupo: chat.name,
             mensajeId: message.id._serialized
         });

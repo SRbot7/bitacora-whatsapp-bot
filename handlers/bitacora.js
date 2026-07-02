@@ -15,17 +15,34 @@ const { logPersistencia } = require('../lib/persistence-log');
 
 const COMANDOS_GUIA_BITACORA = [
     'GUIA BITACORA',
+    'GUIA BOTACORA',
     'GUIA',
     'NUEVA BITACORA',
-    'INICIAR BITACORA'
+    'INICIAR BITACORA',
+    'INICIAR BOTACORA'
 ];
 
-const COMANDOS_CANCELAR = ['CANCELAR', 'SALIR', 'CANCELAR BITACORA'];
-const COMANDOS_AYUDA_BITACORA = ['AYUDA', 'AYUDA BITACORA'];
+const COMANDOS_CANCELAR = ['CANCELAR', 'SALIR', 'CANCELAR BITACORA', 'CANCELAR BOTACORA'];
+const COMANDOS_AYUDA_BITACORA = ['AYUDA', 'AYUDA BITACORA', 'AYUDA BOTACORA'];
+
+function normalizarComando(texto = '') {
+    return texto
+        .toUpperCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
 
 function esFormatoBitacoraValido(texto = '') {
-    const limpio = texto.trim();
-    return /area\s*:/i.test(limpio) && /pendientes\s*:/i.test(limpio);
+    const datos = extraerDatosBitacora(texto || '', '');
+
+    return (
+        datos.turno !== 'Sin turno' &&
+        datos.area !== 'Sin area' &&
+        Boolean((datos.actividad || '').trim()) &&
+        Boolean((datos.tecnico || '').trim())
+    );
 }
 
 function iniciarFlujoBitacora({ clave, nombreAutor }) {
@@ -126,18 +143,21 @@ function construirMensajeAgradecimientoBitacora({ tecnico, idActividad }) {
 
 async function manejarBitacora({ message, chat, textoOriginal, nombreAutor, fecha }) {
 
-    if (message.fromMe) {
-        return;
-    }
-
     // Blindaje: este handler solo debe persistir datos del grupo BITACORA.
-    if (chat.name !== 'BITACORA-MTTO-SHP1') {
+    const chatNombre = (chat.name || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+
+    if (chatNombre !== 'bitacora-mtto-shp1') {
         console.log('⛔ Bloqueado en BITACORA: grupo no permitido para bitacora ->', chat.name);
         return;
     }
 
     const descripcion = (textoOriginal || '').trim();
-    const descripcionUpper = descripcion.toUpperCase();
+    const descripcionUpper = normalizarComando(descripcion);
     const clave = claveMemoria(chat.name, message.author);
     const flujoActivo = flujosBitacora[clave];
 

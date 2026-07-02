@@ -6,7 +6,15 @@ const {
 const {
     registrarAsistenciaMantenimiento
 } = require('../services/asistencia-mantenimiento');
+const { autorPermitidoPorGrupo } = require('../services/asistencia-limpieza');
 const { logPersistencia } = require('../lib/persistence-log');
+
+const AUTORES_MTTO_POR_NUMERO = {
+    '202013803569317@lid': 'Eliezer Romero Romero',
+    '68028557435039@lid': 'Flavio Cruz Santiago',
+    '189795108180057@lid': 'Saul Romero Romero',
+    '189795108180057:33@lid': 'Saul Romero Romero'
+};
 
 function normalizarTexto(texto = '') {
     return texto
@@ -53,9 +61,23 @@ function detectarUbicacion(texto = '') {
     return extraerCampo(texto, /(?:UBICACION|LUGAR|LOCALIZACION):\s*(.+)/i, 'Sin ubicacion');
 }
 
-async function manejarMantenimiento({ message, chat, textoOriginal, nombreAutor, fecha, tipoFuente }) {
+function resolverAutorMantenimiento(nombreAutor = '', autorNumero = '') {
+    if (autorPermitidoPorGrupo(nombreAutor, 'Asistencia SHP1 Pachuca')) {
+        return nombreAutor;
+    }
+
+    return AUTORES_MTTO_POR_NUMERO[autorNumero] || nombreAutor;
+}
+
+async function manejarMantenimiento({ message, chat, textoOriginal, nombreAutor, fecha, tipoFuente, autorNumero = '' }) {
     const texto = normalizarTexto(textoOriginal);
     const fechaArchivo = fecha.format('YYYY-MM-DD');
+    const autorResuelto = resolverAutorMantenimiento(nombreAutor, autorNumero);
+
+    if (tipoFuente === 'MANTENIMIENTO_ASISTENCIA' && !autorPermitidoPorGrupo(autorResuelto, chat.name)) {
+        console.log('⏭️ ASISTENCIA MTTO ignorada: autor fuera del personal permitido =>', nombreAutor);
+        return;
+    }
 
     if (tipoFuente === 'MANTENIMIENTO_FALLAS') {
         const area = extraerCampo(texto, /AREA:\s*(.+)/i, 'General');
@@ -68,7 +90,7 @@ async function manejarMantenimiento({ message, chat, textoOriginal, nombreAutor,
 
         const idFalla = await registrarFallaMantenimiento({
             fecha,
-            autor: nombreAutor,
+            autor: autorResuelto,
             grupo: chat.name,
             area,
             equipo,
@@ -81,7 +103,7 @@ async function manejarMantenimiento({ message, chat, textoOriginal, nombreAutor,
         logPersistencia({
             tabla: 'mantenimiento_fallas',
             id: idFalla,
-            autor: nombreAutor,
+            autor: autorResuelto,
             grupo: chat.name,
             mensajeId: message.id._serialized
         });
@@ -98,7 +120,7 @@ async function manejarMantenimiento({ message, chat, textoOriginal, nombreAutor,
 
     const idAsistencia = await registrarAsistenciaMantenimiento({
         fecha,
-        autor: nombreAutor,
+        autor: autorResuelto,
         grupo: chat.name,
         tipoEvento,
         ubicacion,
@@ -110,7 +132,7 @@ async function manejarMantenimiento({ message, chat, textoOriginal, nombreAutor,
     logPersistencia({
         tabla: 'asistencia_mantenimiento_eventos',
         id: idAsistencia,
-        autor: nombreAutor,
+        autor: autorResuelto,
         grupo: chat.name,
         mensajeId: message.id._serialized
     });

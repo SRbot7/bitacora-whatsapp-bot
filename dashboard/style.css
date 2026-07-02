@@ -264,6 +264,11 @@ button:hover {
     gap: 10px;
     margin-bottom: 10px;
 }
+.estado-d {
+     background: rgba(52, 152, 219, 0.18);
+     border-color: rgba(52, 152, 219, 0.5);
+     color: #9fd3ff;
+}
 
 .home-card,
 .quick-card {

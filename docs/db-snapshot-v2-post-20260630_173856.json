@@ -1,0 +1,246 @@
+{
+  "generated_at": "2026-06-30T23:38:56.603Z",
+  "tables": [
+    {
+      "table_name": "actividades_limpieza",
+      "estimated_rows": "256",
+      "total_bytes": "180224"
+    },
+    {
+      "table_name": "actividades_mtto",
+      "estimated_rows": "3",
+      "total_bytes": "352256"
+    },
+    {
+      "table_name": "asistencia_limpieza_ajustes",
+      "estimated_rows": "0",
+      "total_bytes": "65536"
+    },
+    {
+      "table_name": "asistencia_limpieza_diaria",
+      "estimated_rows": "0",
+      "total_bytes": "49152"
+    },
+    {
+      "table_name": "asistencia_mantenimiento_eventos",
+      "estimated_rows": "0",
+      "total_bytes": "49152"
+    },
+    {
+      "table_name": "evidencias_limpieza",
+      "estimated_rows": "462",
+      "total_bytes": "163840"
+    },
+    {
+      "table_name": "evidencias_materiales",
+      "estimated_rows": "3",
+      "total_bytes": "32768"
+    },
+    {
+      "table_name": "evidencias_mtto",
+      "estimated_rows": "75",
+      "total_bytes": "352256"
+    },
+    {
+      "table_name": "evidencias_pendientes",
+      "estimated_rows": "8",
+      "total_bytes": "32768"
+    },
+    {
+      "table_name": "evidencias_proyectos",
+      "estimated_rows": "10",
+      "total_bytes": "32768"
+    },
+    {
+      "table_name": "mantenimiento_fallas",
+      "estimated_rows": "7751",
+      "total_bytes": "3645440"
+    },
+    {
+      "table_name": "materiales_solicitados",
+      "estimated_rows": "2",
+      "total_bytes": "65536"
+    },
+    {
+      "table_name": "pendientes_supervisor",
+      "estimated_rows": "16",
+      "total_bytes": "155648"
+    },
+    {
+      "table_name": "preventivos_semanales",
+      "estimated_rows": "0",
+      "total_bytes": "73728"
+    },
+    {
+      "table_name": "proyectos_mtto",
+      "estimated_rows": "3",
+      "total_bytes": "65536"
+    }
+  ],
+  "indexes": [
+    {
+      "tablename": "actividades_limpieza",
+      "indexname": "actividades_limpieza_pkey"
+    },
+    {
+      "tablename": "actividades_limpieza",
+      "indexname": "idx_limpieza_area"
+    },
+    {
+      "tablename": "actividades_limpieza",
+      "indexname": "idx_limpieza_fecha"
+    },
+    {
+      "tablename": "actividades_limpieza",
+      "indexname": "idx_limpieza_grupo_fecha"
+    },
+    {
+      "tablename": "actividades_mtto",
+      "indexname": "actividades_mtto_mensaje_id_key"
+    },
+    {
+      "tablename": "actividades_mtto",
+      "indexname": "actividades_mtto_pkey"
+    },
+    {
+      "tablename": "actividades_mtto",
+      "indexname": "idx_actividades_autor_grupo"
+    },
+    {
+      "tablename": "actividades_mtto",
+      "indexname": "idx_area"
+    },
+    {
+      "tablename": "actividades_mtto",
+      "indexname": "idx_fecha"
+    },
+    {
+      "tablename": "actividades_mtto",
+      "indexname": "idx_grupo"
+    },
+    {
+      "tablename": "actividades_mtto",
+      "indexname": "idx_tecnico"
+    },
+    {
+      "tablename": "asistencia_limpieza_ajustes",
+      "indexname": "asistencia_limpieza_ajustes_fecha_persona_key_key"
+    },
+    {
+      "tablename": "asistencia_limpieza_ajustes",
+      "indexname": "asistencia_limpieza_ajustes_pkey"
+    },
+    {
+      "tablename": "asistencia_limpieza_ajustes",
+      "indexname": "idx_asistencia_limpieza_ajustes_fecha"
+    },
+    {
+      "tablename": "asistencia_limpieza_diaria",
+      "indexname": "asistencia_limpieza_diaria_fecha_autor_grupo_key"
+    },
+    {
+      "tablename": "asistencia_limpieza_diaria",
+      "indexname": "asistencia_limpieza_diaria_pkey"
+    },
+    {
+      "tablename": "asistencia_mantenimiento_eventos",
+      "indexname": "asistencia_mantenimiento_eventos_mensaje_id_key"
+    },
+    {
+      "tablename": "asistencia_mantenimiento_eventos",
+      "indexname": "asistencia_mantenimiento_eventos_pkey"
+    },
+    {
+      "tablename": "evidencias_limpieza",
+      "indexname": "evidencias_limpieza_pkey"
+    },
+    {
+      "tablename": "evidencias_limpieza",
+      "indexname": "idx_evidencias_limpieza"
+    },
+    {
+      "tablename": "evidencias_materiales",
+      "indexname": "evidencias_materiales_pkey"
+    },
+    {
+      "tablename": "evidencias_mtto",
+      "indexname": "evidencias_mtto_pkey"
+    },
+    {
+      "tablename": "evidencias_mtto",
+      "indexname": "idx_evidencias_actividad"
+    },
+    {
+      "tablename": "evidencias_pendientes",
+      "indexname": "evidencias_pendientes_pkey"
+    },
+    {
+      "tablename": "evidencias_proyectos",
+      "indexname": "evidencias_proyectos_pkey"
+    },
+    {
+      "tablename": "mantenimiento_fallas",
+      "indexname": "mantenimiento_fallas_mensaje_id_key"
+    },
+    {
+      "tablename": "mantenimiento_fallas",
+      "indexname": "mantenimiento_fallas_pkey"
+    },
+    {
+      "tablename": "materiales_solicitados",
+      "indexname": "idx_material_area"
+    },
+    {
+      "tablename": "materiales_solicitados",
+      "indexname": "idx_material_estado"
+    },
+    {
+      "tablename": "materiales_solicitados",
+      "indexname": "materiales_solicitados_pkey"
+    },
+    {
+      "tablename": "pendientes_supervisor",
+      "indexname": "idx_pendientes_estado"
+    },
+    {
+      "tablename": "pendientes_supervisor",
+      "indexname": "idx_pendientes_estado_categoria_fecha"
+    },
+    {
+      "tablename": "pendientes_supervisor",
+      "indexname": "idx_pendientes_fecha"
+    },
+    {
+      "tablename": "pendientes_supervisor",
+      "indexname": "idx_pendientes_prioridad"
+    },
+    {
+      "tablename": "pendientes_supervisor",
+      "indexname": "pendientes_supervisor_pkey"
+    },
+    {
+      "tablename": "preventivos_semanales",
+      "indexname": "idx_preventivos_semana"
+    },
+    {
+      "tablename": "preventivos_semanales",
+      "indexname": "preventivos_semanales_mensaje_id_key"
+    },
+    {
+      "tablename": "preventivos_semanales",
+      "indexname": "preventivos_semanales_pkey"
+    },
+    {
+      "tablename": "proyectos_mtto",
+      "indexname": "idx_proyecto_area"
+    },
+    {
+      "tablename": "proyectos_mtto",
+      "indexname": "idx_proyecto_estado"
+    },
+    {
+      "tablename": "proyectos_mtto",
+      "indexname": "proyectos_mtto_pkey"
+    }
+  ]
+}

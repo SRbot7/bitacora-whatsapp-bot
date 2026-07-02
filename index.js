@@ -9,6 +9,7 @@ const { obtenerTextoMensaje } = require('./lib/bitacora-parser');
 const { manejarSupervisor }   = require('./handlers/supervisor');
 const { manejarBitacora }     = require('./handlers/bitacora');
 const { manejarLimpieza }     = require('./handlers/limpieza');
+const { manejarMantenimiento } = require('./handlers/mantenimiento');
 const { manejarPreventivos }   = require('./handlers/preventivos');
 const {
     obtenerAlertasAsistenciaLimpieza,
@@ -18,6 +19,19 @@ const {
     obtenerResumenOperativo,
     construirMensajeResumenOperativo
 } = require('./services/reportes');
+const {
+    sincronizarEstadosAsistencia
+} = require('./services/estado-asistencia');
+
+function normalizarNombreGrupo(nombre = '') {
+    return nombre
+        .toString()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+}
 
 
 
@@ -26,25 +40,41 @@ const {
 // =========================
 
 const GRUPOS = {
-    'BITACORA-MTTO-SHP1':                'BITACORA',
-    'Centro Operativo SHP1':             'SUPERVISOR',
-    'MELI SVC PACHUCA - BATIA LIMPIEZA': 'LIMPIEZA'
+    [normalizarNombreGrupo('BITACORA-MTTO-SHP1')]:                'BITACORA',
+    [normalizarNombreGrupo('Centro Operativo SHP1')]:             'SUPERVISOR',
+    [normalizarNombreGrupo('MELI SVC PACHUCA - BATIA LIMPIEZA')]: 'LIMPIEZA',
+    [normalizarNombreGrupo('Asistencia SHP1 Pachuca')]:           'MANTENIMIENTO_ASISTENCIA'
 };
+
+const GRUPOS_BLOQUEADOS = new Set([
+    normalizarNombreGrupo('Mantenimiento SHP1')
+]);
 
 const HORARIOS_REPORTE = ['06:30', '15:30', '22:30'];
 const COMANDOS_REPORTE = ['REPORTE', 'RESUMEN', 'REPORTE OPERATIVO', 'RESUMEN OPERATIVO'];
 const AUTO_REPORTES_ACTIVOS = (process.env.AUTO_REPORTES_ACTIVOS || 'false').toLowerCase() === 'true';
-const ALERTAS_ASISTENCIA_ACTIVAS = false;
+const ALERTAS_ASISTENCIA_ACTIVAS = (process.env.ALERTAS_ASISTENCIA_ACTIVAS || 'true').toLowerCase() === 'true';
+const ESTADOS_ASISTENCIA_SYNC_MINUTES = Math.max(1, Number.parseInt(process.env.ESTADOS_ASISTENCIA_SYNC_MINUTES || '5', 10) || 5);
 const GRUPO_ALERTAS_SUPERVISOR = 'Centro Operativo SHP1';
 const MODO_SOLO_LECTURA_GRUPOS = true;
 const GRUPOS_SALIDA_HABILITADA = new Set([
-    'BITACORA-MTTO-SHP1',
-    'Centro Operativo SHP1'
+    normalizarNombreGrupo('BITACORA-MTTO-SHP1'),
+    normalizarNombreGrupo('Centro Operativo SHP1')
+]);
+const COMANDOS_CONTROL_BOT = new Set([
+    'BOT STOP', 'BOT PAUSA',
+    'BOT START', 'BOT REANUDAR',
+    'BOT RESET',
+    'BOT STATUS', 'BOT ESTADO'
 ]);
 
 let schedulerReportesId = null;
+let schedulerEstadosAsistenciaId = null;
 const reporteEnviadoHoy = {};
 const alertaAsistenciaEnviada = {};
+let botPausado = false;
+let botPausadoAt = null;
+let botPausadoPor = '';
 
 function normalizarComando(texto = '') {
     return texto
@@ -81,9 +111,12 @@ function esEntradaOperativaSupervisorDesdePropio(texto = '') {
     const comandosDirectos = new Set([
         'ASISTENCIA', 'EN SITIO',
         'ASISTENCIA HOY', 'EN TURNO',
+        'MARCADOR', 'MARCADOR ASISTENCIA', 'RESUMEN ASISTENCIA',
+        'BOT STOP', 'BOT PAUSA', 'BOT START', 'BOT REANUDAR', 'BOT RESET', 'BOT STATUS', 'BOT ESTADO',
         'AYUDA', 'AYUDA GUIADA', 'GUIA AYUDA', 'AYUDA RAPIDA',
         'LISTAR', 'ABIERTOS', 'CERRADOS',
-        'PREVENTIVOS', 'ALERTAS',
+        'PREVENTIVOS', 'ALERTAS', 'ALERTAS ASISTENCIA',
+        'REPORTE', 'RESUMEN', 'REPORTE OPERATIVO', 'RESUMEN OPERATIVO',
         'CANCELAR', 'SALIR',
         '1', '2',
         'LIMPIEZA', 'MTTO', 'MANTENIMIENTO'
@@ -102,8 +135,131 @@ function esEntradaOperativaSupervisorDesdePropio(texto = '') {
     return /^[A-Z0-9 .'-]{2,60}$/.test(comando);
 }
 
+function obtenerComandoControlBot(texto = '') {
+    const comando = normalizarComando(texto);
+    if (!comando) {
+        return '';
+    }
+
+    return COMANDOS_CONTROL_BOT.has(comando) ? comando : '';
+}
+
+function limpiarMapeo(obj) {
+    Object.keys(obj).forEach((key) => {
+        delete obj[key];
+    });
+}
+
+async function manejarComandoControlBot({ comando, chat, nombreAutor, clientRef }) {
+    const nowMx = moment().tz('America/Mexico_City').format('YYYY-MM-DD HH:mm:ss');
+
+    if (comando === 'BOT STOP' || comando === 'BOT PAUSA') {
+        botPausado = true;
+        botPausadoAt = nowMx;
+        botPausadoPor = nombreAutor || 'Sin nombre';
+
+        await chat.sendMessage(
+            [
+                '🛑 BOT EN PAUSA DE EMERGENCIA',
+                `Activado por: ${botPausadoPor}`,
+                `Fecha: ${botPausadoAt}`,
+                '',
+                'Comandos disponibles:',
+                '• BOT STATUS',
+                '• BOT START',
+                '• BOT RESET'
+            ].join('\n')
+        );
+        return true;
+    }
+
+    if (comando === 'BOT START' || comando === 'BOT REANUDAR') {
+        botPausado = false;
+        await chat.sendMessage(
+            [
+                '✅ BOT REANUDADO',
+                `Solicitó: ${nombreAutor || 'Sin nombre'}`,
+                `Fecha: ${nowMx}`
+            ].join('\n')
+        );
+        return true;
+    }
+
+    if (comando === 'BOT RESET') {
+        limpiarMapeo(alertaAsistenciaEnviada);
+        limpiarMapeo(reporteEnviadoHoy);
+        botPausado = false;
+
+        iniciarSchedulerReportes(clientRef);
+        iniciarSchedulerEstadosAsistencia();
+
+        await chat.sendMessage(
+            [
+                '♻️ BOT RESETEADO',
+                'Se limpiaron cachés de alertas/reportes y se reiniciaron schedulers.',
+                `Solicitó: ${nombreAutor || 'Sin nombre'}`,
+                `Fecha: ${nowMx}`
+            ].join('\n')
+        );
+        return true;
+    }
+
+    if (comando === 'BOT STATUS' || comando === 'BOT ESTADO') {
+        await chat.sendMessage(
+            [
+                '🤖 ESTADO DEL BOT',
+                `Pausado: ${botPausado ? 'SI' : 'NO'}`,
+                `Pausado por: ${botPausadoPor || '-'}`,
+                `Pausado desde: ${botPausadoAt || '-'}`,
+                `Alertas activas: ${ALERTAS_ASISTENCIA_ACTIVAS ? 'SI' : 'NO'}`,
+                `Sync asistencia (min): ${ESTADOS_ASISTENCIA_SYNC_MINUTES}`,
+                '',
+                'Comandos:',
+                '• BOT STOP',
+                '• BOT START',
+                '• BOT RESET'
+            ].join('\n')
+        );
+        return true;
+    }
+
+    return false;
+}
+
+function esEntradaOperativaBitacoraDesdePropio(texto = '') {
+    const comando = normalizarComando(texto);
+    if (!comando) {
+        return false;
+    }
+
+    if (
+        comando.startsWith('BITACORA TURNO') ||
+        comando.startsWith('BITACORA TURNO:') ||
+        comando.startsWith('GUIA BITACORA') ||
+        comando.startsWith('GUIA BOTACORA') ||
+        comando.startsWith('INICIAR BITACORA') ||
+        comando.startsWith('INICIAR BOTACORA') ||
+        comando === 'GUIA' ||
+        comando === 'AYUDA' ||
+        comando === 'AYUDA BITACORA' ||
+        comando === 'AYUDA BOTACORA' ||
+        comando === 'CANCELAR' ||
+        comando === 'SALIR' ||
+        comando === 'CANCELAR BITACORA' ||
+        comando === 'CANCELAR BOTACORA'
+    ) {
+        return true;
+    }
+
+    return /(AREA\s*:|PENDIENTES\s*:|TECNICO\s*:|ACTIVIDADES\s*:)/.test(comando);
+}
+
 async function revisarAlertasAsistencia({ clientRef }) {
     if (!ALERTAS_ASISTENCIA_ACTIVAS) {
+        return;
+    }
+
+    if (botPausado) {
         return;
     }
 
@@ -165,7 +321,9 @@ async function revisarAlertasAsistencia({ clientRef }) {
 
 async function obtenerChatSupervisor(clientRef) {
     const chats = await clientRef.getChats();
-    return chats.find((chat) => chat.isGroup && chat.name === GRUPO_ALERTAS_SUPERVISOR);
+    return chats.find((chat) => {
+        return chat.isGroup && normalizarNombreGrupo(chat.name) === normalizarNombreGrupo(GRUPO_ALERTAS_SUPERVISOR);
+    });
 }
 
 async function enviarResumenOperativo({ clientRef, tipo }) {
@@ -197,12 +355,50 @@ function iniciarSchedulerReportes(clientRef) {
         schedulerReportesId = null;
     }
 
-    console.log('⏸️ Automatismos de grupos deshabilitados: no se enviaran alertas ni reportes automaticos.');
-    return;
+    if (!ALERTAS_ASISTENCIA_ACTIVAS) {
+        console.log('⏸️ Alertas de asistencia desactivadas (ALERTAS_ASISTENCIA_ACTIVAS=false).');
+        return;
+    }
+
+    console.log('🔔 Alertas de asistencia activas: se notificará solo en Centro Operativo SHP1.');
+
+    const ejecutar = async () => {
+        try {
+            await revisarAlertasAsistencia({ clientRef });
+
+            if (AUTO_REPORTES_ACTIVOS) {
+                console.log('ℹ️ AUTO_REPORTES_ACTIVOS=true, pero los reportes automaticos siguen deshabilitados por política de solo escucha.');
+            }
+        } catch (error) {
+            console.error('❌ Error enviando alertas automáticas:', error);
+        }
+    };
+
+    ejecutar();
+    schedulerReportesId = setInterval(ejecutar, 30 * 1000);
+}
+
+function iniciarSchedulerEstadosAsistencia() {
+    if (schedulerEstadosAsistenciaId) {
+        clearInterval(schedulerEstadosAsistenciaId);
+        schedulerEstadosAsistenciaId = null;
+    }
+
+    const ejecutarSincronizacion = async () => {
+        try {
+            await sincronizarEstadosAsistencia(pool);
+            console.log('🧭 Estados de asistencia sincronizados.');
+        } catch (error) {
+            console.error('⚠️ Error sincronizando estados de asistencia:', error);
+        }
+    };
+
+    ejecutarSincronizacion();
+    schedulerEstadosAsistenciaId = setInterval(ejecutarSincronizacion, ESTADOS_ASISTENCIA_SYNC_MINUTES * 60 * 1000);
 }
 
 function salidaGrupoPermitida(chat) {
-    return !!(chat?.isGroup && GRUPOS_SALIDA_HABILITADA.has(chat.name));
+    return !!(chat?.isGroup && GRUPOS_SALIDA_HABILITADA.has(normalizarNombreGrupo(chat.name)));
 }
 
 function crearChatSoloLectura(chat) {
@@ -321,6 +517,7 @@ client.on('ready', async () => {
     const version = await client.getWWebVersion();
     console.log('Version WhatsApp:', version);
     iniciarSchedulerReportes(client);
+    iniciarSchedulerEstadosAsistencia();
 });
 
 
@@ -364,18 +561,31 @@ client.on('message_create', async (message) => {
             return;
         }
 
-        const tipoFuente = GRUPOS[chat.name];
+        const chatNameNormalizado = normalizarNombreGrupo(chat.name);
+
+        if (GRUPOS_BLOQUEADOS.has(chatNameNormalizado)) {
+            console.log('⛔ Grupo bloqueado (fuera de operación):', chat.name);
+            return;
+        }
+
+        const tipoFuente = GRUPOS[chatNameNormalizado];
 
         if (!tipoFuente) {
             console.log('⏸️ Grupo fuera de alcance (ignorado):', chat.name);
             return;
         }
 
+        const comandoControlBot = tipoFuente === 'SUPERVISOR'
+            ? obtenerComandoControlBot(textoOriginal)
+            : '';
+
         if (message.fromMe) {
             const permitirFromMeSupervisor =
                 tipoFuente === 'SUPERVISOR' && esEntradaOperativaSupervisorDesdePropio(textoOriginal);
+            const permitirFromMeBitacora =
+                tipoFuente === 'BITACORA' && esEntradaOperativaBitacoraDesdePropio(textoOriginal);
 
-            if (!permitirFromMeSupervisor) {
+            if (!permitirFromMeSupervisor && !permitirFromMeBitacora) {
                 console.log('⏸️ Mensaje fromMe ignorado:', {
                     grupo: chat.name,
                     tipoFuente,
@@ -383,6 +593,32 @@ client.on('message_create', async (message) => {
                 });
                 return;
             }
+        }
+
+        if (tipoFuente === 'SUPERVISOR' && comandoControlBot) {
+            if (!message.fromMe) {
+                console.log('⛔ Comando de control bot rechazado (solo fromMe):', comandoControlBot);
+                return;
+            }
+
+            const fechaControl = moment().tz('America/Mexico_City');
+            const nombreAutorControl = message._data.notifyName || message.author || 'Sin nombre';
+            await manejarComandoControlBot({
+                comando: comandoControlBot,
+                chat,
+                nombreAutor: nombreAutorControl,
+                clientRef: client
+            });
+            return;
+        }
+
+        if (botPausado) {
+            console.log('⏸️ Bot en pausa de emergencia. Mensaje ignorado:', {
+                grupo: chat.name,
+                tipoFuente,
+                preview: textoOriginal.replace(/\s+/g, ' ').slice(0, 80)
+            });
+            return;
         }
 
         const messageSafe = crearMensajeSoloLectura(message, chat);
@@ -446,6 +682,19 @@ client.on('message_create', async (message) => {
                 textoOriginal,
                 nombreAutor,
                 fecha
+            });
+            return;
+        }
+
+        if (tipoFuente === 'MANTENIMIENTO_ASISTENCIA') {
+            await manejarMantenimiento({
+                message: messageSafe,
+                chat: chatSafe,
+                textoOriginal,
+                nombreAutor,
+                autorNumero: message.author || '',
+                fecha,
+                tipoFuente
             });
             return;
         }
