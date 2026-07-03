@@ -311,11 +311,10 @@ Tambien viven en `services/limpieza-personal.js`.
 Puntos importantes:
 
 1. Nadie descansa en jueves.
-2. Hugo descansa fijo en lunes.
-3. Hay rotacion de descanso para el 1er turno.
-4. Hay rotacion de descanso para el 2do turno.
-5. Jose Luis descansa sabado.
-6. Existen ajustes manuales en la tabla `asistencia_limpieza_ajustes`.
+2. Primer turno rota en ciclo de 3 semanas: semana base viernes Yuri, sabado Hugo, domingo Luci; despues viernes Luci, sabado Yuri, domingo Hugo; despues viernes Hugo, sabado Luci, domingo Yuri; y se repite.
+3. Segundo turno rota semanalmente: semana base sabado Margarita y domingo Gloria; la siguiente semana sabado Gloria y domingo Margarita.
+4. Jose Luis descansa sabado fijo.
+5. Existen ajustes manuales en la tabla `asistencia_limpieza_ajustes`.
 
 ## 13. Tablas importantes
 

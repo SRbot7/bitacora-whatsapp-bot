@@ -237,6 +237,7 @@ async function obtenerAlertasAsistenciaLimpieza(pool, ahoraInput = null) {
             fecha: ahoraMx.format('YYYY-MM-DD'),
             personaKey: persona.key
         });
+        const permiso = ajuste?.tipo === 'PERMISO';
 
         let descanso = esDescansoProgramado(persona.key, dayIdx, weekOffset);
         if (ajuste?.tipo === 'DESCANSO') {
@@ -246,7 +247,7 @@ async function obtenerAlertasAsistenciaLimpieza(pool, ahoraInput = null) {
             descanso = false;
         }
 
-        if (descanso) {
+        if (descanso || permiso) {
             continue;
         }
 
@@ -302,6 +303,7 @@ async function obtenerEstadoTurnoLimpieza(pool, ahoraInput = null) {
         enTurno: [],
         sinRegistro: [],
         descanso: [],
+        permiso: [],
         sinCobertura: true
     };
 
@@ -312,6 +314,7 @@ async function obtenerEstadoTurnoLimpieza(pool, ahoraInput = null) {
             fecha: ahoraMx.format('YYYY-MM-DD'),
             personaKey: persona.key
         });
+        const permiso = ajuste?.tipo === 'PERMISO';
 
         let descanso = esDescansoProgramado(persona.key, dayIdx, weekOffset);
         if (ajuste?.tipo === 'DESCANSO') {
@@ -332,6 +335,15 @@ async function obtenerEstadoTurnoLimpieza(pool, ahoraInput = null) {
 
         if (descanso) {
             resumen.descanso.push({
+                key: persona.key,
+                persona: persona.nombre,
+                turno: persona.turno
+            });
+            continue;
+        }
+
+        if (permiso) {
+            resumen.permiso.push({
                 key: persona.key,
                 persona: persona.nombre,
                 turno: persona.turno
@@ -374,6 +386,15 @@ async function obtenerAlertasAsistenciaIngenieria(pool, ahoraInput = null) {
     const alertas = [];
 
     for (const persona of ALERTAS_ASISTENCIA_INGENIERIA_TURNO) {
+        const ajuste = await obtenerAjusteAsistencia(pool, {
+            fecha: ahoraMx.format('YYYY-MM-DD'),
+            personaKey: persona.key
+        });
+
+        if (ajuste?.tipo === 'PERMISO') {
+            continue;
+        }
+
         const ventana = obtenerVentanaTurno(persona, ahoraMx);
         if (ahoraMx.isBefore(ventana.inicio) || ahoraMx.isAfter(ventana.fin)) {
             continue;

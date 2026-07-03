@@ -75,8 +75,8 @@ async function manejarMantenimiento({ message, chat, textoOriginal, nombreAutor,
     const autorResuelto = resolverAutorMantenimiento(nombreAutor, autorNumero);
 
     if (tipoFuente === 'MANTENIMIENTO_ASISTENCIA' && !autorPermitidoPorGrupo(autorResuelto, chat.name)) {
-        console.log('⏭️ ASISTENCIA MTTO ignorada: autor fuera del personal permitido =>', nombreAutor);
-        return;
+        console.log('⚠️ ASISTENCIA MTTO: autor no en lista, registrando igual =>', autorResuelto);
+        // No se bloquea — se registra todo para análisis de patrones
     }
 
     if (tipoFuente === 'MANTENIMIENTO_FALLAS') {
@@ -112,11 +112,19 @@ async function manejarMantenimiento({ message, chat, textoOriginal, nombreAutor,
 
     const tipoEvento = detectarTipoEvento(texto);
     const turno = detectarTurno(texto);
-    const ubicacion = detectarUbicacion(texto);
 
-    const rutaEvidencia = message.hasMedia
-        ? await guardarEvidencia(message, fechaArchivo, 'evidencias_mantenimiento')
-        : '';
+    // Capturar ubicación GPS si el mensaje es de tipo location
+    let ubicacion = detectarUbicacion(texto);
+    let mensajeParaGuardar = texto;
+
+    if (message.type === 'location' && message.location) {
+        const loc = message.location;
+        const lat = loc.latitude || '';
+        const lng = loc.longitude || '';
+        const desc = loc.description || loc.address || '';
+        ubicacion = `GPS:${lat},${lng}${desc ? ` | ${desc}` : ''}`;
+        mensajeParaGuardar = `[UBICACION] ${desc || `${lat},${lng}`}`;
+    }
 
     const idAsistencia = await registrarAsistenciaMantenimiento({
         fecha,
@@ -125,7 +133,7 @@ async function manejarMantenimiento({ message, chat, textoOriginal, nombreAutor,
         tipoEvento,
         ubicacion,
         turno,
-        mensajeOriginal: texto,
+        mensajeOriginal: mensajeParaGuardar || `[${message.type || 'chat'}]`,
         mensajeId: message.id._serialized
     });
 

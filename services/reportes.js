@@ -1,3 +1,4 @@
+const moment = require('moment-timezone');
 const pool = require('../db');
 const {
     obtenerAlertasAsistenciaLimpieza,
@@ -134,6 +135,7 @@ function construirResumenEstadoPersistido(items = [], area = '') {
         salida: [],
         fueraTurno: [],
         descanso: [],
+        permiso: [],
         sinCobertura: true
     };
 
@@ -143,6 +145,11 @@ function construirResumenEstadoPersistido(items = [], area = '') {
 
         if (estado === 'descanso') {
             resumen.descanso.push(persona);
+            continue;
+        }
+
+        if (estado === 'permiso') {
+            resumen.permiso.push(persona);
             continue;
         }
 
@@ -161,7 +168,7 @@ function construirResumenEstadoPersistido(items = [], area = '') {
         resumen.fueraTurno.push(persona);
     }
 
-    if (area === 'LIMPIEZA' && resumen.enTurno.length === 0 && resumen.salida.length === 0 && resumen.descanso.length === 0) {
+    if (area === 'LIMPIEZA' && resumen.enTurno.length === 0 && resumen.salida.length === 0 && resumen.descanso.length === 0 && resumen.permiso.length === 0) {
         resumen.sinCobertura = true;
     }
 
@@ -198,6 +205,7 @@ async function obtenerResumenAsistenciaGeneral() {
         salida: ingenieriaPersistida.salida,
         fueraTurno: ingenieriaPersistida.fueraTurno,
         descanso: ingenieriaPersistida.descanso,
+        permiso: ingenieriaPersistida.permiso,
         sinCobertura: ingenieriaPersistida.sinCobertura
     };
 
@@ -211,6 +219,7 @@ async function obtenerResumenAsistenciaGeneral() {
         sinRegistro: limpiezaPersistida.fueraTurno,
         salida: limpiezaPersistida.salida,
         descanso: limpiezaPersistida.descanso,
+        permiso: limpiezaPersistida.permiso,
         fueraTurno: limpiezaPersistida.fueraTurno
     };
 

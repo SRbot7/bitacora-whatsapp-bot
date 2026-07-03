@@ -51,6 +51,37 @@ const {
 const {
     MARCADOR_PERSONAL
 } = require('../services/limpieza-personal');
+const {
+    validarLimitesPermisoMes,
+    validarCoberturaTurno,
+    registrarPermisoConAprobacion,
+    aprobarPermiso,
+    reportePermisosDelMes,
+    reportePermisosPersona,
+    listarDeudasPendientes
+} = require('../services/permisos-workflow');
+const {
+    menuPrincipal,
+    menuAyuda,
+    menuGuia,
+    menuInformes,
+    menuPendientes,
+    menuPreventivos,
+    menuAsistencia,
+    menuAlertas,
+    menuConfigurar,
+    detalleAyudaPendientes,
+    detalleAyudaMateriales,
+    detalleAyudaProyectos,
+    detalleAyudaEvidencias,
+    detalleAyudaPermisos,
+    detalleAyudaAsistencia,
+    guiaPermisoMenuEquipos,
+    guiaPermisoMenuNombres,
+    guiaPermisoPaso3Dia,
+    guiaPermisoPaso4Razon,
+    guiaPermisoPaso5Tipo
+} = require('../lib/menus-minimalistas');
 
 
 // =========================
@@ -316,25 +347,38 @@ function iniciarFlujoProyecto(clave, nombreAutor) {
 
 function iniciarFlujoAyudaGuiada(clave) {
     flujosSupervisor[clave] = {
-        tipo: 'AYUDA_GUIADA',
+        tipo: 'MENU_PRINCIPAL',
+        paso: 0,
+        data: {}
+    };
+}
+
+function iniciarFlujoMenuAyuda(clave) {
+    flujosSupervisor[clave] = {
+        tipo: 'MENU_AYUDA',
+        paso: 0,
+        data: {}
+    };
+}
+
+function iniciarFlujoMenuGuia(clave) {
+    flujosSupervisor[clave] = {
+        tipo: 'MENU_GUIA',
+        paso: 0,
+        data: {}
+    };
+}
+
+function iniciarFlujoMenuInformes(clave) {
+    flujosSupervisor[clave] = {
+        tipo: 'MENU_INFORMES',
         paso: 0,
         data: {}
     };
 }
 
 function mensajeMenuAyudaGuiada() {
-    return [
-        '🧭 AYUDA GUIADA (rápida)',
-        '',
-        'Elige una opción y responde con número:',
-        '1) Pendientes',
-        '2) Materiales/Insumos',
-        '3) Proyectos',
-        '4) Evidencias/Fotos',
-        '5) Consultas',
-        '',
-        'Escribe SALIR para cerrar esta ayuda.'
-    ].join('\n');
+    return menuPrincipal();
 }
 
 function resolverAyudaGuiada(respuesta = '') {
@@ -923,12 +967,326 @@ function parsearAsistenciaMantenimientoManual(cuerpo = '', nombreAutor = '') {
 // HANDLER SUPERVISOR
 // =========================
 
+// =============================================
+// PROCESADOR DE MENÚS ANIDADOS
+// =============================================
+
+async function procesarMenuAnidado({ flujo, respuesta, mensaje, clave }) {
+    const valor = (respuesta || '').trim().toLowerCase();
+
+    // Opción para volver atrás
+    if (valor === '0' || valor === 'atras' || valor === 'atrás') {
+        delete flujosSupervisor[clave];
+        return { siguiente: 'MENU_PRINCIPAL', msg: menuPrincipal() };
+    }
+
+    // Salir
+    if (valor === 'cancelar' || valor === 'salir' || valor === 'exit') {
+        delete flujosSupervisor[clave];
+        return { siguiente: null, msg: '🛑 Menú cerrado.' };
+    }
+
+    // MENU_PRINCIPAL
+    if (flujo.tipo === 'MENU_PRINCIPAL') {
+        if (valor === '1') {
+            flujosSupervisor[clave] = { tipo: 'MENU_AYUDA', paso: 0, data: {} };
+            return { siguiente: 'MENU_AYUDA', msg: menuAyuda() };
+        }
+        if (valor === '2') {
+            flujosSupervisor[clave] = { tipo: 'MENU_GUIA', paso: 0, data: {} };
+            return { siguiente: 'MENU_GUIA', msg: menuGuia() };
+        }
+        if (valor === '3') {
+            flujosSupervisor[clave] = { tipo: 'MENU_INFORMES', paso: 0, data: {} };
+            return { siguiente: 'MENU_INFORMES', msg: menuInformes() };
+        }
+        if (valor === '4') {
+            flujosSupervisor[clave] = { tipo: 'MENU_ALERTAS', paso: 0, data: {} };
+            return { siguiente: 'MENU_ALERTAS', msg: menuAlertas() };
+        }
+        if (valor === '5') {
+            flujosSupervisor[clave] = { tipo: 'MENU_CONFIGURAR', paso: 0, data: {} };
+            return { siguiente: 'MENU_CONFIGURAR', msg: menuConfigurar() };
+        }
+        return { siguiente: null, msg: '⚠️ Opción no válida. Responde 1-5 o escribe CANCELAR.' };
+    }
+
+    // MENU_AYUDA
+    if (flujo.tipo === 'MENU_AYUDA') {
+        if (valor === '1') return { siguiente: null, msg: detalleAyudaPendientes() };
+        if (valor === '2') return { siguiente: null, msg: detalleAyudaMateriales() };
+        if (valor === '3') return { siguiente: null, msg: detalleAyudaProyectos() };
+        if (valor === '4') return { siguiente: null, msg: detalleAyudaEvidencias() };
+        if (valor === '5') return { siguiente: null, msg: detalleAyudaPermisos() };
+        if (valor === '6') return { siguiente: null, msg: detalleAyudaAsistencia() };
+        return { siguiente: null, msg: '⚠️ Opción no válida. Responde 1-6 o 0 para atrás.' };
+    }
+
+    // MENU_GUIA
+    if (flujo.tipo === 'MENU_GUIA') {
+        if (valor === '1') {
+            flujosSupervisor[clave] = { tipo: 'PENDIENTE', paso: 0, data: { descripcion: '' } };
+            return { siguiente: 'GUIA_PENDIENTE', msg: 'Iniciando PENDIENTE...\nEscribe la descripción:' };
+        }
+        if (valor === '2') {
+            flujosSupervisor[clave] = { tipo: 'MATERIAL', paso: 0, data: { material: '' } };
+            return { siguiente: 'GUIA_MATERIAL', msg: 'Iniciando MATERIAL...\nEscribe el material:' };
+        }
+        if (valor === '3') {
+            flujosSupervisor[clave] = { tipo: 'PROYECTO', paso: 0, data: { nombre: '' } };
+            return { siguiente: 'GUIA_PROYECTO', msg: 'Iniciando PROYECTO...\nEscribe el nombre:' };
+        }
+        if (valor === '4') {
+            flujosSupervisor[clave] = { tipo: 'PERMISO_GUIADO', paso: 0, data: {} };
+            return { siguiente: 'GUIA_PERMISO', msg: guiaPermisoMenuEquipos() };
+        }
+        return { siguiente: null, msg: '⚠️ Opción no válida. Responde 1-4 o 0 para atrás.' };
+    }
+
+    // MENU_INFORMES
+    if (flujo.tipo === 'MENU_INFORMES') {
+        if (valor === '1') {
+            flujosSupervisor[clave] = { tipo: 'MENU_PENDIENTES', paso: 0, data: {} };
+            return { siguiente: 'MENU_PENDIENTES', msg: menuPendientes() };
+        }
+        if (valor === '2') {
+            flujosSupervisor[clave] = { tipo: 'MENU_PREVENTIVOS', paso: 0, data: {} };
+            return { siguiente: 'MENU_PREVENTIVOS', msg: menuPreventivos() };
+        }
+        if (valor === '3') {
+            return { comando: 'MATERIALES' };
+        }
+        if (valor === '4') {
+            flujosSupervisor[clave] = { tipo: 'MENU_ASISTENCIA', paso: 0, data: {} };
+            return { siguiente: 'MENU_ASISTENCIA', msg: menuAsistencia() };
+        }
+        if (valor === '5') {
+            return { comando: 'PERMISOS RESUMEN' };
+        }
+        if (valor === '6') {
+            return { comando: 'REPORTE' };
+        }
+        return { siguiente: null, msg: '⚠️ Opción no válida. Responde 1-6 o 0 para atrás.' };
+    }
+
+    // MENU_PENDIENTES
+    if (flujo.tipo === 'MENU_PENDIENTES') {
+        if (valor === '1') {
+            return { comando: 'LISTAR' };
+        }
+        if (valor === '2') {
+            return { comando: 'ABIERTOS' };
+        }
+        if (valor === '3') {
+            return { comando: 'CERRADOS' };
+        }
+        if (valor === '4') {
+            return { comando: 'COMPLETADOS' };
+        }
+        if (valor === '5') {
+            return { siguiente: null, msg: '🔍 ¿Qué ID buscas?\n\nEscribe: LISTAR <ID>\n\nEj: LISTAR 42' };
+        }
+        return { siguiente: null, msg: '⚠️ Opción no válida. Responde 1-5 o 0 para atrás.' };
+    }
+
+    // MENU_PREVENTIVOS
+    if (flujo.tipo === 'MENU_PREVENTIVOS') {
+        if (valor === '1') {
+            return { comando: 'PREVENTIVOS' };
+        }
+        if (valor === '2') {
+            return { comando: 'PREVENTIVOS' };
+        }
+        if (valor === '3') {
+            return { comando: 'PREVENTIVOS CERRADOS' };
+        }
+        if (valor === '4') {
+            return { siguiente: null, msg: '🔒 ¿Qué ID de preventivo?\n\nEscribe: CERRAR PREVENTIVO <ID>\n\nEj: CERRAR PREVENTIVO 7' };
+        }
+        return { siguiente: null, msg: '⚠️ Opción no válida. Responde 1-4 o 0 para atrás.' };
+    }
+
+    // MENU_ASISTENCIA
+    if (flujo.tipo === 'MENU_ASISTENCIA') {
+        if (valor === '1') {
+            return { comando: 'MARCADOR' };
+        }
+        if (valor === '2') {
+            return { comando: 'EN TURNO' };
+        }
+        if (valor === '3') {
+            return { comando: 'ASISTENCIA HOY' };
+        }
+        if (valor === '4') {
+            return { comando: 'ESTADO TURNO LIMPIEZA' };
+        }
+        if (valor === '5') {
+            return { comando: 'ALERTAS ASISTENCIA' };
+        }
+        return { siguiente: null, msg: '⚠️ Opción no válida. Responde 1-5 o 0 para atrás.' };
+    }
+
+    // MENU_ALERTAS
+    if (flujo.tipo === 'MENU_ALERTAS') {
+        if (valor === '1') {
+            return { comando: 'ALERTAS ASISTENCIA' };
+        }
+        if (valor === '2') {
+            return { comando: 'ALERTAS PENDIENTES' };
+        }
+        if (valor === '3') {
+            return { comando: 'ALERTAS DEUDAS' };
+        }
+        return { siguiente: null, msg: '⚠️ Opción no válida. Responde 1-3 o 0 para atrás.' };
+    }
+
+    // MENU_CONFIGURAR
+    if (flujo.tipo === 'MENU_CONFIGURAR') {
+        if (valor === '1') {
+            return { siguiente: null, msg: '✅ Para aprobar un permiso:\n\nAPROBAR PERMISO <ID>\n\nEj: APROBAR PERMISO 15' };
+        }
+        if (valor === '2') {
+            return { siguiente: null, msg: '🗑️ Para cancelar un ajuste:\n\nCANCELAR AJUSTE <ID>\n\nEj: CANCELAR AJUSTE 8' };
+        }
+        if (valor === '3') {
+            return { comando: 'PERMISOS LIMITES' };
+        }
+        return { siguiente: null, msg: '⚠️ Opción no válida. Responde 1-3 o 0 para atrás.' };
+    }
+
+    return { siguiente: null, msg: '⚠️ Error al procesar menú.' };
+}
+
 async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fecha }) {
 
     const descripcion = (textoOriginal || '').trim();
     const desc        = normalizarComando(descripcion);
     const clave       = claveMemoria(chat.name, message.author);
     const flujoActivo = flujosSupervisor[clave];
+
+    // =========================
+    // COMANDOS DE ALTA PRIORIDAD (antes de flujos)
+    // =========================
+    
+    console.log('🔍 DEBUG manejarSupervisor - descripcion:', descripcion.slice(0, 80));
+    console.log('🔍 DEBUG - desc normalizado:', desc);
+    
+    // MARCAR PRESENTE <NOMBRE>
+    const marcarPresenteMatch = descripcion.match(/^marcar\s+presente\s*:\s*(.+)$/i);
+    console.log('🔍 DEBUG marcarPresenteMatch:', marcarPresenteMatch ? 'SÍ' : 'NO');
+    if (marcarPresenteMatch) {
+        console.log('✅ DETECTADO: MARCAR PRESENTE');
+        const persona = marcarPresenteMatch[1].trim();
+        
+        let personaResolvida = MARCADOR_PERSONAL.find(p => 
+            p.nombre.toLowerCase().includes(persona.toLowerCase()) ||
+            persona.toLowerCase().includes(p.nombre.toLowerCase()) ||
+            p.aliases?.some(a => a.toLowerCase().includes(persona.toLowerCase()))
+        );
+        
+        if (!personaResolvida) {
+            personaResolvida = resolverIngenieriaPersona(persona);
+        }
+
+        if (!personaResolvida) {
+            await message.reply(`⚠️ Persona no encontrada: "${persona}". Escribe nombre completo o alias.`);
+            return;
+        }
+
+        try {
+            await pool.query(
+                `INSERT INTO asistencia_limpieza_ajustes (fecha, persona_key, tipo)
+                 VALUES ($1, $2, 'LABORA')
+                 ON CONFLICT (fecha, persona_key) DO UPDATE SET tipo = 'LABORA'`,
+                [fecha.format('YYYY-MM-DD'), personaResolvida.key]
+            );
+
+            await message.reply(
+                `✅ ${personaResolvida.nombre} marcado como PRESENTE\n` +
+                `📅 Fecha: ${fecha.format('DD/MM/YYYY')}\n` +
+                `Se cancelan alertas de asistencia para este día.`
+            );
+        } catch (error) {
+            console.error('❌ Error marcando presente:', error);
+            await message.reply(`❌ Error: ${error.message}`);
+        }
+        return;
+    }
+
+    // REGISTRAR FALTA <NOMBRE> | <MOTIVO>
+    // REGISTRAR FALTA: Nombre | Motivo [| YYYY-MM-DD o DD/MM/YYYY]
+    const registrarFaltaMatch = descripcion.match(/^REGISTRAR\s+FALTA\s*:\s*(.+?)\s*\|\s*(.+?)(?:\s*\|\s*(.+))?$/i);
+    if (registrarFaltaMatch) {
+        console.log('✅ DETECTADO: REGISTRAR FALTA');
+        const persona = registrarFaltaMatch[1].trim();
+        const motivo = registrarFaltaMatch[2].trim();
+        let fechaRegistro = fecha; // Por defecto, hoy
+        
+        // Si hay fecha opcional
+        if (registrarFaltaMatch[3]) {
+            const fechaStr = registrarFaltaMatch[3].trim();
+            let fechaParsed;
+            
+            // Intentar parsear en formato DD/MM/YYYY
+            if (fechaStr.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
+                fechaParsed = moment(fechaStr, 'DD/MM/YYYY');
+            }
+            // O en formato YYYY-MM-DD
+            else if (fechaStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                fechaParsed = moment(fechaStr, 'YYYY-MM-DD');
+            }
+            
+            if (fechaParsed && fechaParsed.isValid()) {
+                fechaRegistro = fechaParsed.tz('America/Mexico_City');
+            } else {
+                await message.reply(`⚠️ Fecha inválida: "${fechaStr}". Usa DD/MM/YYYY o YYYY-MM-DD`);
+                return;
+            }
+        }
+        
+        let personaResolvida = MARCADOR_PERSONAL.find(p => 
+            p.nombre.toLowerCase().includes(persona.toLowerCase()) ||
+            persona.toLowerCase().includes(p.nombre.toLowerCase()) ||
+            p.aliases?.some(a => a.toLowerCase().includes(persona.toLowerCase()))
+        );
+        
+        if (!personaResolvida) {
+            personaResolvida = resolverIngenieriaPersona(persona);
+        }
+
+        if (!personaResolvida) {
+            await message.reply(`⚠️ Persona no encontrada: "${persona}". Escribe nombre completo o alias.`);
+            return;
+        }
+
+        try {
+            // Registra como PERMISO (no DESCANSO)
+            await pool.query(
+                `INSERT INTO asistencia_limpieza_ajustes (fecha, persona_key, tipo, motivo, creado_por)
+                 VALUES ($1, $2, 'PERMISO', $3, $4)
+                 ON CONFLICT (fecha, persona_key) DO UPDATE SET tipo = 'PERMISO', motivo = $3`,
+                [fechaRegistro.format('YYYY-MM-DD'), personaResolvida.key, motivo, nombreAutor]
+            );
+
+            const mañana = fechaRegistro.clone().add(1, 'day').format('DD/MM/YYYY');
+            await message.reply(
+                `✅ PERMISO registrado para ${personaResolvida.nombre}\n` +
+                `📅 Fecha: ${fechaRegistro.format('DD/MM/YYYY')}\n` +
+                `💬 Motivo: ${motivo}\n\n` +
+                `⏰ PRÓXIMO PASO:\n` +
+                `Mañana (${mañana}) registra compensación:\n\n` +
+                `MARCAR PRESENTE: ${personaResolvida.nombre}`
+            );
+        } catch (error) {
+            console.error('❌ Error registrando permiso:', error);
+            await message.reply(`❌ Error: ${error.message}`);
+        }
+        return;
+    }
+
+    // =========================
+    // RESTO DE PROCESAMIENTO
+    // =========================
 
     if (COMANDOS_CANCELAR.includes(desc)) {
         if (flujoActivo) {
@@ -960,13 +1318,54 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
 
     if (!message.hasMedia && COMANDOS_GUIA_AYUDA.includes(desc)) {
         iniciarFlujoAyudaGuiada(clave);
-        await message.reply(mensajeMenuAyudaGuiada());
+        await message.reply(menuPrincipal());
         return;
     }
 
     if (!message.hasMedia && (desc === 'ASISTENCIA' || desc === 'EN SITIO')) {
         iniciarFlujoAsistenciaGuiada(clave, nombreAutor);
         await message.reply(mensajeMenuAsistenciaArea());
+        return;
+    }
+
+    if (flujoActivo && !message.hasMedia && [
+        'MENU_PRINCIPAL', 'MENU_AYUDA', 'MENU_GUIA', 
+        'MENU_INFORMES', 'MENU_ALERTAS', 'MENU_CONFIGURAR',
+        'MENU_PENDIENTES', 'MENU_PREVENTIVOS', 'MENU_ASISTENCIA'
+    ].includes(flujoActivo.tipo)) {
+        const resultado = await procesarMenuAnidado({
+            flujo: flujoActivo,
+            respuesta: descripcion,
+            mensaje: message,
+            clave
+        });
+
+        // Si el resultado contiene un comando a ejecutar, hazlo directamente
+        if (resultado.comando) {
+            delete flujosSupervisor[clave];
+            // Re-ejecutar el handler con el comando como descripción
+            return await manejarSupervisor({
+                message,
+                chat,
+                textoOriginal: resultado.comando,
+                nombreAutor,
+                fecha
+            });
+        }
+
+        if (!resultado.siguiente) {
+            delete flujosSupervisor[clave];
+            await message.reply(resultado.msg);
+            return;
+        }
+
+        if (resultado.siguiente === 'MENU_PRINCIPAL') {
+            flujosSupervisor[clave] = { tipo: 'MENU_PRINCIPAL', paso: 0, data: {} };
+            await message.reply(resultado.msg);
+            return;
+        }
+
+        await message.reply(resultado.msg);
         return;
     }
 
@@ -1319,30 +1718,8 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
     // =========================
 
     if (desc === 'AYUDA') {
-        await message.reply(`🤖 CENTRO OPERATIVO SHP1
-
-AYUDA RÁPIDA
-• AYUDA GUIADA (recomendada)
-• GUIA PENDIENTE | GUIA MATERIAL | GUIA PROYECTO
-• LISTAR | ABIERTOS | CERRADOS | COMPLETADOS
-• PREVENTIVOS | PREVENTIVOS CERRADOS | CERRAR PREVENTIVO <ID>
-• MATERIALES | PROYECTOS | RIESGOS
-• ASISTENCIA | ASISTENCIA HOY | EN TURNO | MARCADOR
-• ALERTAS | ALERTAS ASISTENCIA
-• REPORTE | RESUMEN OPERATIVO
-• PERMISOS (qué está habilitado en Centro Operativo)
-• BOT STATUS | BOT STOP | BOT START | BOT RESET
-
-Ayudas detalladas:
-• AYUDA PENDIENTES
-• AYUDA MATERIALES
-• AYUDA PROYECTOS
-• AYUDA EVIDENCIAS
-• AYUDA PREVENTIVOS
-• AYUDA ALERTAS
-• AYUDA PERMISOS
-
-Escribe AYUDA GUIADA para resolver dudas paso a paso.`);
+        iniciarFlujoAyudaGuiada(clave);
+        await message.reply(menuPrincipal());
         return;
     }
 

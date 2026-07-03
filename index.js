@@ -126,6 +126,11 @@ function esEntradaOperativaSupervisorDesdePropio(texto = '') {
         return true;
     }
 
+    // Comandos de presencia/falta
+    if (/^MARCAR\s+PRESENTE\s*:/i.test(texto) || /^REGISTRAR\s+FALTA\s*:/i.test(texto)) {
+        return true;
+    }
+
     // Opciones numericas de menus guiados (ej. 1, 2, 3, ...).
     if (/^\d{1,2}$/.test(comando)) {
         return true;
@@ -251,7 +256,20 @@ function esEntradaOperativaBitacoraDesdePropio(texto = '') {
         return true;
     }
 
-    return /(AREA\s*:|PENDIENTES\s*:|TECNICO\s*:|ACTIVIDADES\s*:)/.test(comando);
+    return /(AREA\s*:|PENDIENTES\s*:|TECNICO\s*:|ACTIVIDAD(?:ES)?\s*:|BITACORA\s+TURNO\b)/.test(comando);
+}
+
+function esEntradaOperativaMantenimientoDesdePropio(texto = '') {
+    const comando = normalizarComando(texto);
+    if (!comando) {
+        return false;
+    }
+
+    return (
+        /(ENTRADA|INGRESO|INICIO TURNO|LLEGADA|SALIDA|SALIENDO|FIN TURNO|EGRESO)/.test(comando) ||
+        /(TURNO\s*:|UBICACION\s*:|LUGAR\s*:|LOCALIZACION\s*:)/.test(comando) ||
+        /(FALLA\s*:|AREA\s*:|EQUIPO\s*:|PRIORIDAD\s*:)/.test(comando)
+    );
 }
 
 async function revisarAlertasAsistencia({ clientRef }) {
@@ -305,12 +323,17 @@ async function revisarAlertasAsistencia({ clientRef }) {
             continue;
         }
 
+        const esIngenieria = (alerta.etiqueta || '').toUpperCase() === 'INGENIERIA';
+        const estatusMsg = esIngenieria
+            ? `Estatus: Sin registro de check-in despues de ${alerta.toleranciaMin} minutos de iniciado el turno. Se considera falta operativa.`
+            : `Estatus: Sin evidencia de actividad despues de ${alerta.toleranciaMin} minutos. Se considera falta operativa.`;
+
         const mensaje = [
             `🚨 ALERTA ASISTENCIA ${alerta.etiqueta || 'OPERATIVA'}`,
             `Personal: ${alerta.persona}`,
             `Turno: ${alerta.turnoInicio} - ${alerta.turnoFin}`,
             `Grupo esperado: ${alerta.grupo}`,
-            `Estatus: Sin evidencia de actividad despues de ${alerta.toleranciaMin} minutos. Se considera falta operativa.`
+            estatusMsg
         ].join('\n');
 
         await chatSupervisor.sendMessage(mensaje);
@@ -583,9 +606,11 @@ client.on('message_create', async (message) => {
             const permitirFromMeSupervisor =
                 tipoFuente === 'SUPERVISOR' && esEntradaOperativaSupervisorDesdePropio(textoOriginal);
             const permitirFromMeBitacora =
-                tipoFuente === 'BITACORA' && esEntradaOperativaBitacoraDesdePropio(textoOriginal);
+                tipoFuente === 'BITACORA' && (message.hasMedia || esEntradaOperativaBitacoraDesdePropio(textoOriginal));
+            const permitirFromMeMantenimiento =
+                tipoFuente === 'MANTENIMIENTO_ASISTENCIA'; // Saul es el mismo número del bot; registrar todo
 
-            if (!permitirFromMeSupervisor && !permitirFromMeBitacora) {
+            if (!permitirFromMeSupervisor && !permitirFromMeBitacora && !permitirFromMeMantenimiento) {
                 console.log('⏸️ Mensaje fromMe ignorado:', {
                     grupo: chat.name,
                     tipoFuente,

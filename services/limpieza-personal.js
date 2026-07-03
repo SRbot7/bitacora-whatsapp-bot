@@ -40,7 +40,18 @@ const MARCADOR_PERSONAL = [
 ];
 
 const DESCANSOS_FIJOS_PERSONAL = {
-    hugo: [0]
+    jose_luis: [5]
+};
+
+const DESCANSOS_ROTACION_PRIMER_TURNO = {
+    4: ['yuri', 'lucy', 'hugo'],
+    5: ['hugo', 'yuri', 'lucy'],
+    6: ['lucy', 'hugo', 'yuri']
+};
+
+const DESCANSOS_ROTACION_SEGUNDO_TURNO = {
+    5: ['margarita', 'gloria'],
+    6: ['gloria', 'margarita']
 };
 
 function mod(valor, base) {
@@ -75,10 +86,9 @@ function esDescansoProgramado(personaKey, dayIdx, weekOffset) {
     }
 
     if (personaKey === 'lucy' || personaKey === 'yuri' || personaKey === 'hugo') {
-        if (dayIdx >= 4) {
-            const orden = ['lucy', 'yuri', 'hugo'];
-            const pos = dayIdx - 4;
-            const asignado = orden[mod(pos - weekOffset, orden.length)];
+        const rotacion = DESCANSOS_ROTACION_PRIMER_TURNO[dayIdx];
+        if (Array.isArray(rotacion) && rotacion.length > 0) {
+            const asignado = rotacion[mod(weekOffset, rotacion.length)];
             return asignado === personaKey;
         }
 
@@ -86,18 +96,13 @@ function esDescansoProgramado(personaKey, dayIdx, weekOffset) {
     }
 
     if (personaKey === 'gloria' || personaKey === 'margarita') {
-        if (dayIdx === 5 || dayIdx === 6) {
-            const orden = ['gloria', 'margarita'];
-            const pos = dayIdx - 5;
-            const asignado = orden[mod(pos - weekOffset, orden.length)];
+        const rotacion = DESCANSOS_ROTACION_SEGUNDO_TURNO[dayIdx];
+        if (Array.isArray(rotacion) && rotacion.length > 0) {
+            const asignado = rotacion[mod(weekOffset, rotacion.length)];
             return asignado === personaKey;
         }
 
         return false;
-    }
-
-    if (personaKey === 'jose_luis') {
-        return dayIdx === 5;
     }
 
     return false;

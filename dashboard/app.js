@@ -422,6 +422,7 @@ function construirIndicadorEstadoPersistido(items = [], area = '') {
         salida: [],
         fueraTurno: [],
         descanso: [],
+        permiso: [],
         sinCobertura: true
     };
 
@@ -431,6 +432,11 @@ function construirIndicadorEstadoPersistido(items = [], area = '') {
 
         if (estado === 'descanso') {
             resumen.descanso.push(nombre);
+            return;
+        }
+
+        if (estado === 'permiso') {
+            resumen.permiso.push(nombre);
             return;
         }
 
@@ -449,7 +455,7 @@ function construirIndicadorEstadoPersistido(items = [], area = '') {
         resumen.fueraTurno.push(nombre);
     });
 
-    if (area === 'LIMPIEZA' && resumen.enTurno.length === 0 && resumen.salida.length === 0 && resumen.descanso.length === 0) {
+    if (area === 'LIMPIEZA' && resumen.enTurno.length === 0 && resumen.salida.length === 0 && resumen.descanso.length === 0 && resumen.permiso.length === 0) {
         resumen.sinCobertura = true;
     }
 
@@ -556,9 +562,10 @@ function renderPrincipalListado({ summary, pendientes, asistenciaLimpieza, asist
                 <div class="home-turno-item warn">Salida: <b>${indicadorMtto.salida.length}</b></div>
                 <div class="home-turno-item warn">Fuera de turno: <b>${indicadorMtto.fueraTurno.length}</b></div>
                 <div class="home-turno-item rest">Descanso: <b>${indicadorMtto.descanso.length}</b></div>
+                <div class="home-turno-item perm">Permiso: <b>${indicadorMtto.permiso.length}</b></div>
             </div>
             <div class="home-mini-line">
-                ${indicadorMtto.enTurno.length ? `Asistencia SHP1 Pachuca: ${indicadorMtto.enTurno.slice(0, 3).join(', ')}` : indicadorMtto.salida.length ? `Salida registrada: ${indicadorMtto.salida.slice(0, 3).join(', ')}` : 'Sin activos con reporte hoy en Asistencia SHP1 Pachuca.'}
+                ${indicadorMtto.enTurno.length ? `Asistencia SHP1 Pachuca: ${indicadorMtto.enTurno.slice(0, 3).join(', ')}` : indicadorMtto.salida.length ? `Salida registrada: ${indicadorMtto.salida.slice(0, 3).join(', ')}` : indicadorMtto.permiso.length ? `Permiso autorizado: ${indicadorMtto.permiso.slice(0, 3).join(', ')}` : 'Sin activos con reporte hoy en Asistencia SHP1 Pachuca.'}
             </div>
         </button>
 
@@ -569,12 +576,15 @@ function renderPrincipalListado({ summary, pendientes, asistenciaLimpieza, asist
                 <div class="home-turno-item warn">Salida: <b>${indicadorLimpieza.salida.length}</b></div>
                 <div class="home-turno-item warn">Fuera de turno: <b>${indicadorLimpieza.fueraTurno.length}</b></div>
                 <div class="home-turno-item rest">Descanso: <b>${indicadorLimpieza.descanso.length}</b></div>
+                <div class="home-turno-item perm">Permiso: <b>${indicadorLimpieza.permiso.length}</b></div>
             </div>
             <div class="home-mini-line">
                 ${indicadorLimpieza.enTurno.length
                     ? `MELI SVC PACHUCA - BATIA LIMPIEZA: ${indicadorLimpieza.enTurno.slice(0, 3).join(', ')}`
                     : indicadorLimpieza.salida.length
                         ? `MELI SVC PACHUCA - BATIA LIMPIEZA: salida registrada ${indicadorLimpieza.salida.slice(0, 3).join(', ')}`
+                        : indicadorLimpieza.permiso.length
+                            ? `MELI SVC PACHUCA - BATIA LIMPIEZA: permiso autorizado ${indicadorLimpieza.permiso.slice(0, 3).join(', ')}`
                         : indicadorLimpieza.descanso.length
                             ? `MELI SVC PACHUCA - BATIA LIMPIEZA: descanso programado ${indicadorLimpieza.descanso.slice(0, 3).join(', ')}`
                             : 'MELI SVC PACHUCA - BATIA LIMPIEZA: sin activos con reporte en el turno actual.'}
@@ -647,7 +657,7 @@ function renderIngenieriaAsistenciaCard(ingenieria) {
     const listado = items.length
         ? items.map((x) => `
             <li>
-                <span class="asistencia-chip ${x.estado === 'A' ? 'estado-a' : (x.estado === 'R' ? 'estado-r' : (x.estado === 'D' ? 'estado-d' : 'estado-f'))}">${x.estado}</span>
+                <span class="asistencia-chip ${x.estado === 'A' ? 'estado-a' : (x.estado === 'P' ? 'estado-p' : (x.estado === 'R' ? 'estado-r' : (x.estado === 'D' ? 'estado-d' : 'estado-f')))}">${x.estado}</span>
                 ${x.persona || '-'} | ${x.puesto || '-'} | ${x.turno || '-'}
             </li>
         `).join('')
@@ -674,9 +684,11 @@ function renderSupervisorAsistenciaListado(data) {
             : `Dia ${formatFechaCorta(data.fecha)}`;
 
     const rows = items.map((x) => {
-        const estadoClass = x.estado === 'A' ? 'estado-a' : (x.estado === 'R' ? 'estado-r' : 'estado-f');
+        const estadoClass = x.estado === 'A' ? 'estado-a' : (x.estado === 'P' ? 'estado-p' : (x.estado === 'R' ? 'estado-r' : 'estado-f'));
         const estadoLabel = x.estado === 'A'
             ? 'Asistencia en tiempo'
+            : x.estado === 'P'
+                ? 'Permiso autorizado'
             : x.estado === 'R'
                 ? 'Retardo de asistencia'
                 : 'Sin asistencia';
@@ -696,16 +708,18 @@ function renderSupervisorAsistenciaListado(data) {
     }).join('');
 
     const totalA = items.filter((x) => x.estado === 'A').length;
+    const totalP = items.filter((x) => x.estado === 'P').length;
     const totalR = items.filter((x) => x.estado === 'R').length;
     const totalF = items.filter((x) => x.estado === 'F').length;
 
     return `
         <div class="asistencia-legend">
             <span class="asistencia-chip estado-a">A</span> Asistencia
+            <span class="asistencia-chip estado-p">P</span> Permiso
             <span class="asistencia-chip estado-r">R</span> Retardo
             <span class="asistencia-chip estado-f">F</span> Falta
         </div>
-        <div class="status">${periodLabel} | A: ${totalA} | R: ${totalR} | F: ${totalF}</div>
+        <div class="status">${periodLabel} | A: ${totalA} | P: ${totalP} | R: ${totalR} | F: ${totalF}</div>
         <section class="asistencia-day">
             <h3>Ingenieria de Planta | Asistencia ${periodLabel}</h3>
             <div class="asistencia-row asistencia-head">
@@ -733,11 +747,13 @@ function renderSupervisorAsistenciaMarcadorListado(data) {
 
     const bodyRows = items.map((item) => {
         const dias = (item.marcador || []).map((dia) => {
-            const className = dia.estado === 'A' ? 'estado-a' : (dia.estado === 'D' ? 'estado-d' : (dia.estado === 'R' ? 'estado-r' : 'estado-f'));
+            const className = dia.estado === 'A' ? 'estado-a' : (dia.estado === 'D' ? 'estado-d' : (dia.estado === 'P' ? 'estado-p' : (dia.estado === 'R' ? 'estado-r' : 'estado-f')));
             const tooltip = dia.estado === 'A'
                 ? `Asistencia en tiempo (${dia.total_reportes || 0} reportes)`
                 : dia.estado === 'D'
                     ? 'Descanso programado'
+                    : dia.estado === 'P'
+                        ? 'Permiso autorizado'
                     : dia.estado === 'R'
                         ? 'Retardo de asistencia (> 1 hora)'
                         : 'Falta';
@@ -756,6 +772,7 @@ function renderSupervisorAsistenciaMarcadorListado(data) {
                 ${dias}
                 <td class="tot-col">${item.totales?.A ?? 0}</td>
                 <td class="tot-col">${item.totales?.D ?? 0}</td>
+                <td class="tot-col">${item.totales?.P ?? 0}</td>
                 <td class="tot-col">${item.totales?.R ?? 0}</td>
                 <td class="tot-col">${item.totales?.F ?? 0}</td>
             </tr>
@@ -766,6 +783,7 @@ function renderSupervisorAsistenciaMarcadorListado(data) {
         <div class="asistencia-legend">
             <span class="asistencia-chip estado-a">A</span> Asistencia
             <span class="asistencia-chip estado-d">D</span> Descanso
+            <span class="asistencia-chip estado-p">P</span> Permiso
             <span class="asistencia-chip estado-r">R</span> Retardo
             <span class="asistencia-chip estado-f">F</span> Falta
         </div>
@@ -815,7 +833,7 @@ function renderAlertasAsistenciaListado(data) {
     return `
         <div class="card card-section-title">
             <h3>Ingenieria de planta | Alertas de asistencia</h3>
-            <div class="section-subtitle">Personal en turno sin evidencia despues de ${data.toleranciaMin || 60} minutos de tolerancia.</div>
+            <div class="section-subtitle">Personal en turno sin registro de check-in despues de ${data.toleranciaMin || 60} minutos de iniciado el turno.</div>
         </div>
         <div class="asistencia-legend">
             <span class="asistencia-chip estado-f">ALERTA</span> Requiere seguimiento operativo
@@ -1046,6 +1064,7 @@ function renderAsistenciaAgrupadaListado(data) {
 function classByEstado(estado) {
     if (estado === 'A') return 'estado-a';
     if (estado === 'D') return 'estado-d';
+    if (estado === 'P') return 'estado-p';
     if (estado === 'R') return 'estado-r';
     return 'estado-f';
 }
@@ -1067,6 +1086,8 @@ function renderAsistenciaMarcadorListado(data) {
             const className = classByEstado(dia.estado);
             const tooltip = dia.estado === 'D'
                 ? 'Descanso programado'
+                : dia.estado === 'P'
+                    ? 'Permiso autorizado'
                 : dia.estado === 'A'
                     ? `Asistencia en tiempo (${dia.total_reportes || 0} reportes)`
                     : dia.estado === 'R'
@@ -1087,6 +1108,7 @@ function renderAsistenciaMarcadorListado(data) {
                 ${dias}
                 <td class="tot-col">${item.totales?.A ?? 0}</td>
                 <td class="tot-col">${item.totales?.D ?? 0}</td>
+                <td class="tot-col">${item.totales?.P ?? 0}</td>
                 <td class="tot-col">${item.totales?.R ?? 0}</td>
                 <td class="tot-col">${item.totales?.F ?? 0}</td>
             </tr>
@@ -1097,6 +1119,7 @@ function renderAsistenciaMarcadorListado(data) {
         <div class="asistencia-legend">
             <span class="asistencia-chip estado-a">A</span> Asistencia
             <span class="asistencia-chip estado-d">D</span> Descanso
+            <span class="asistencia-chip estado-p">P</span> Permiso
             <span class="asistencia-chip estado-r">R</span> Retardo
             <span class="asistencia-chip estado-f">F</span> Falta
         </div>

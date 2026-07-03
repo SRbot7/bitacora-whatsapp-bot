@@ -226,6 +226,7 @@ function construirFechaConHoraIso(fechaIso = '', hhmm = '') {
 
 function resolverEstadoAsistenciaDiaria({
     descanso = false,
+    permiso = false,
     turno = '',
     fechaIso = '',
     primerReporte = null,
@@ -235,6 +236,10 @@ function resolverEstadoAsistenciaDiaria({
 }) {
     if (descanso) {
         return 'D';
+    }
+
+    if (permiso) {
+        return 'P';
     }
 
     const reportes = Number(totalReportes || 0);
@@ -319,7 +324,7 @@ function resolverIngenieriaPersona(autor = '') {
     return null;
 }
 
-function buildIngenieriaRows({ rows, personaKeyByAutor = false }) {
+function buildIngenieriaRows({ rows, personaKeyByAutor = false, mapaAjustes = new Map(), fechaContexto = '' }) {
     const mapa = new Map();
 
     for (const row of rows) {
@@ -385,11 +390,15 @@ function buildIngenieriaRows({ rows, personaKeyByAutor = false }) {
             fechas: new Set()
         };
 
-        let estado = agg.total_reportes > 0 || agg.total_evidencias > 0 ? 'A' : 'F';
+        const ajuste = fechaContexto ? mapaAjustes.get(`${persona.key}|${fechaContexto}`) || null : null;
+        let estado = ajuste?.tipo === 'PERMISO'
+            ? 'P'
+            : (agg.total_reportes > 0 || agg.total_evidencias > 0 ? 'A' : 'F');
         if (estado !== 'F' && agg.fechas.size === 1) {
             const [fechaUnica] = Array.from(agg.fechas.values());
             estado = resolverEstadoAsistenciaDiaria({
                 descanso: false,
+                permiso: ajuste?.tipo === 'PERMISO',
                 turno: persona.turno,
                 fechaIso: fechaUnica,
                 primerReporte: agg.primer_reporte,
@@ -415,7 +424,7 @@ function buildIngenieriaRows({ rows, personaKeyByAutor = false }) {
     });
 }
 
-function buildIngenieriaMarcadorRows({ rows, weekStartDate, autorFiltro = '' }) {
+function buildIngenieriaMarcadorRows({ rows, weekStartDate, autorFiltro = '', mapaAjustes = new Map() }) {
     const dias = buildWeekDays(weekStartDate);
     const mapaAsistencia = new Map();
 
@@ -479,15 +488,24 @@ function buildIngenieriaMarcadorRows({ rows, weekStartDate, autorFiltro = '' }) 
                 autores: new Set()
             };
 
-            const estado = resolverEstadoAsistenciaDiaria({
-                descanso: false,
-                turno: persona.turno,
-                fechaIso: dia.fecha,
-                primerReporte: asistencia.primer_reporte,
-                totalReportes: asistencia.total_reportes,
-                totalEvidencias: asistencia.total_evidencias,
-                requiereEvidencia: false
-            });
+            const ajuste = mapaAjustes.get(`${persona.key}|${dia.fecha}`) || null;
+
+            // Si hay ajuste con LABORA, override a asistencia
+            let estado;
+            if (ajuste?.tipo === 'LABORA') {
+                estado = 'A';
+            } else {
+                estado = resolverEstadoAsistenciaDiaria({
+                    descanso: false,
+                    permiso: ajuste?.tipo === 'PERMISO',
+                    turno: persona.turno,
+                    fechaIso: dia.fecha,
+                    primerReporte: asistencia.primer_reporte,
+                    totalReportes: asistencia.total_reportes,
+                    totalEvidencias: asistencia.total_evidencias,
+                    requiereEvidencia: false
+                });
+            }
 
             return {
                 fecha: dia.fecha,
@@ -502,7 +520,7 @@ function buildIngenieriaMarcadorRows({ rows, weekStartDate, autorFiltro = '' }) 
         const totales = marcador.reduce((acc, dia) => {
             acc[dia.estado] += 1;
             return acc;
-        }, { A: 0, D: 0, R: 0, F: 0 });
+        }, { A: 0, D: 0, P: 0, R: 0, F: 0 });
 
         return {
             persona: persona.nombre,
@@ -1579,6 +1597,7 @@ app.get('/api/v1/limpieza/asistencia-marcador', async (req, res) => {
                 const ajuste = mapaAjustes.get(`${persona.key}|${dia.fecha}`) || null;
 
                 let descanso = esDescansoProgramado(persona.key, dia.idx, weekOffset);
+                const permiso = ajuste?.tipo === 'PERMISO';
 
                 if (ajuste?.tipo === 'DESCANSO') {
                     descanso = true;
@@ -1590,6 +1609,7 @@ app.get('/api/v1/limpieza/asistencia-marcador', async (req, res) => {
 
                 const estado = resolverEstadoAsistenciaDiaria({
                     descanso,
+                    permiso,
                     turno: persona.turno,
                     fechaIso: dia.fecha,
                     primerReporte: asistencia.primer_reporte,
@@ -1612,7 +1632,7 @@ app.get('/api/v1/limpieza/asistencia-marcador', async (req, res) => {
             const totales = marcador.reduce((acc, dia) => {
                 acc[dia.estado] += 1;
                 return acc;
-            }, { A: 0, D: 0, R: 0, F: 0 });
+            }, { A: 0, D: 0, P: 0, R: 0, F: 0 });
 
             return {
                 persona: persona.nombre,
@@ -1703,8 +1723,8 @@ app.post('/api/v1/limpieza/asistencia-ajustes', async (req, res) => {
         }
 
         const tipoUpper = String(tipo).toUpperCase().trim();
-        if (tipoUpper !== 'DESCANSO' && tipoUpper !== 'LABORA') {
-            return res.status(400).json({ error: 'tipo debe ser DESCANSO o LABORA' });
+        if (tipoUpper !== 'DESCANSO' && tipoUpper !== 'LABORA' && tipoUpper !== 'PERMISO') {
+            return res.status(400).json({ error: 'tipo debe ser DESCANSO, LABORA o PERMISO' });
         }
 
         const result = await pool.query(
@@ -1766,6 +1786,7 @@ app.delete('/api/v1/limpieza/asistencia-ajustes/:id', async (req, res) => {
 app.get('/api/v1/ingenieria/asistencia-hoy', async (req, res) => {
     try {
         await asegurarTablaAsistenciaLimpieza();
+        await asegurarTablaAjustesAsistencia();
 
         const fechaHoyMxRes = await pool.query(`SELECT (NOW() AT TIME ZONE 'America/Mexico_City')::date AS fecha_hoy`);
         const fechaHoy = fechaHoyMxRes.rows[0]?.fecha_hoy;
@@ -1775,7 +1796,23 @@ app.get('/api/v1/ingenieria/asistencia-hoy', async (req, res) => {
             fechaFin: fechaHoy
         });
 
-        const items = buildIngenieriaRows({ rows });
+        const ajustesRes = await pool.query(
+            `
+            SELECT fecha::date AS fecha, persona_key, tipo
+            FROM asistencia_limpieza_ajustes
+            WHERE fecha = $1
+            `,
+            [fechaHoy]
+        );
+        const mapaAjustes = new Map();
+        for (const ajuste of ajustesRes.rows) {
+            const fechaIso = toDateOnlyIso(new Date(ajuste.fecha));
+            mapaAjustes.set(`${ajuste.persona_key}|${fechaIso}`, {
+                tipo: (ajuste.tipo || '').toUpperCase()
+            });
+        }
+
+        const items = buildIngenieriaRows({ rows, mapaAjustes, fechaContexto: fechaHoy });
 
         res.json({
             fecha: fechaHoy,
@@ -1880,6 +1917,7 @@ app.get('/api/v1/ingenieria/asistencia-mensual', async (req, res) => {
 app.get('/api/v1/ingenieria/asistencia-marcador', async (req, res) => {
     try {
         await asegurarTablaAsistenciaLimpieza();
+        await asegurarTablaAjustesAsistencia();
 
         const { page, pageSize, offset } = getPagination(req);
         const { autor, grupo, weekStart } = req.query;
@@ -1891,6 +1929,22 @@ app.get('/api/v1/ingenieria/asistencia-marcador', async (req, res) => {
         const fechaInicio = toDateOnlyIso(weekStartDate);
         const fechaFin = toDateOnlyIso(weekEndDate);
         const rows = await queryIngenieriaByDateRange({ fechaInicio, fechaFin });
+        const ajustesRes = await pool.query(
+            `
+            SELECT fecha::date AS fecha, persona_key, tipo
+            FROM asistencia_limpieza_ajustes
+            WHERE fecha >= $1
+              AND fecha <= $2
+            `,
+            [fechaInicio, fechaFin]
+        );
+        const mapaAjustes = new Map();
+        for (const ajuste of ajustesRes.rows) {
+            const fechaIso = toDateOnlyIso(new Date(ajuste.fecha));
+            mapaAjustes.set(`${ajuste.persona_key}|${fechaIso}`, {
+                tipo: (ajuste.tipo || '').toUpperCase()
+            });
+        }
 
         const autorFiltro = (autor || '').toString().trim();
         const grupoFiltro = (grupo || '').toString().trim();
@@ -1911,7 +1965,8 @@ app.get('/api/v1/ingenieria/asistencia-marcador', async (req, res) => {
         const personal = buildIngenieriaMarcadorRows({
             rows: rowsFiltradas,
             weekStartDate,
-            autorFiltro
+            autorFiltro,
+            mapaAjustes
         });
 
         const total = personal.items.length;

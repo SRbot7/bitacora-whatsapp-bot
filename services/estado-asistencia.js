@@ -154,6 +154,7 @@ function resolverEstadoLimpieza(persona, ahoraMx, tieneRegistro, ajuste) {
     const dayIdx = (ahoraMx.isoWeekday() + 6) % 7;
     const weekOffset = getWeekOffset(ahoraMx.toDate());
     let descanso = esDescansoProgramado(persona.key, dayIdx, weekOffset);
+    const permiso = ajuste?.tipo === 'PERMISO';
 
     if (ajuste?.tipo === 'DESCANSO') {
         descanso = true;
@@ -169,6 +170,15 @@ function resolverEstadoLimpieza(persona, ahoraMx, tieneRegistro, ajuste) {
         return {
             estadoTurno: 'DESCANSO',
             detalleTurno: 'Descanso programado',
+            tieneRegistro: false,
+            ventana
+        };
+    }
+
+    if (permiso) {
+        return {
+            estadoTurno: 'PERMISO',
+            detalleTurno: 'Permiso autorizado',
             tieneRegistro: false,
             ventana
         };
@@ -200,10 +210,20 @@ function resolverEstadoLimpieza(persona, ahoraMx, tieneRegistro, ajuste) {
     };
 }
 
-function resolverEstadoMantenimiento(persona, ahoraMx, tieneRegistro) {
+function resolverEstadoMantenimiento(persona, ahoraMx, tieneRegistro, ajuste) {
     const ventana = obtenerVentanaTurno(persona, ahoraMx);
     const dentroVentana = ahoraMx.isSameOrAfter(ventana.inicio) && ahoraMx.isSameOrBefore(ventana.fin);
     const despuesDeSalida = ahoraMx.isAfter(ventana.fin);
+    const permiso = ajuste?.tipo === 'PERMISO';
+
+    if (permiso) {
+        return {
+            estadoTurno: 'PERMISO',
+            detalleTurno: 'Permiso autorizado',
+            tieneRegistro: false,
+            ventana
+        };
+    }
 
     if (despuesDeSalida) {
         return {
@@ -311,14 +331,14 @@ async function sincronizarEstadosAsistencia(poolRef = pool, ahoraInput = null) {
             `
             SELECT autor, tipo_evento, ubicacion, turno, mensaje_id, fecha
             FROM asistencia_mantenimiento_eventos
-            WHERE fecha >= $1
-              AND fecha <= $2
-              AND grupo = $3
+            WHERE fecha >= $1::date
+              AND fecha <= $2::date
+              AND trim(grupo) = trim($3)
             ORDER BY fecha ASC
             `,
             [
-                ventana.inicio.format('YYYY-MM-DD HH:mm:ss'),
-                ventana.fin.format('YYYY-MM-DD HH:mm:ss'),
+                ventana.inicio.format('YYYY-MM-DD'),
+                ventana.fin.format('YYYY-MM-DD'),
                 GRUPO_MANTENIMIENTO
             ]
         );
@@ -326,7 +346,11 @@ async function sincronizarEstadosAsistencia(poolRef = pool, ahoraInput = null) {
         const estado = resolverEstadoMantenimiento(
             persona,
             ahoraMx,
-            mantenimientoRowsRes.rows.some((row) => coincideAutorConPersona(row.autor || '', persona))
+            mantenimientoRowsRes.rows.some((row) => coincideAutorConPersona(row.autor || '', persona)),
+            await obtenerAjusteLimpieza(poolRef, {
+                fecha: fechaHoy,
+                personaKey: persona.key
+            })
         );
         const horario = horarioTurno ? `${horarioTurno.turnoInicio}-${horarioTurno.turnoFin}` : 'Sin horario';
 

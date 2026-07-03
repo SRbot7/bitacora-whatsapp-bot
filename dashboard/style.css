@@ -270,6 +270,12 @@ button:hover {
      color: #9fd3ff;
 }
 
+.estado-p {
+    background: rgba(126, 87, 194, 0.16);
+    border-color: rgba(126, 87, 194, 0.38);
+    color: #6c43b7;
+}
+
 .home-card,
 .quick-card {
     border-radius: 16px;
@@ -488,6 +494,12 @@ button:hover {
     background: #fff3d6;
     color: #9c6500;
     border-color: #ffdf97;
+}
+
+.home-turno-item.perm {
+    background: #efe3ff;
+    color: #6c43b7;
+    border-color: #d0b6ff;
 }
 
 .home-help-card {

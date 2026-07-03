@@ -68,7 +68,7 @@ async function registrarAsistenciaMantenimiento({
         [
             fecha.format('YYYY-MM-DD'),
             autor || 'Sin nombre',
-            grupo || 'Sin grupo',
+            (grupo || 'Sin grupo').trim(),
             (tipoEvento || 'ENTRADA').toUpperCase(),
             ubicacion || 'Sin ubicacion',
             turno || 'Sin turno',
