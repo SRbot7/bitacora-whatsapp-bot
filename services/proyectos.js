@@ -46,4 +46,60 @@ async function registrarProyecto({
 }
 
 
-module.exports = { registrarProyecto };
+// =========================
+// LISTAR PROYECTOS ABIERTOS
+// =========================
+
+async function listarProyectosAbiertos(limit = 20) {
+    const resultado = await pool.query(
+        `
+        SELECT
+            id,
+            nombre,
+            descripcion,
+            area,
+            prioridad,
+            responsable,
+            turno,
+            fecha_programada,
+            estado,
+            porcentaje_avance,
+            costo_estimado,
+            creado_en
+        FROM proyectos_mtto
+        WHERE COALESCE(LOWER(estado), 'abierto') NOT IN ('cerrado', 'completado', 'cancelado', 'finalizado')
+        ORDER BY COALESCE(fecha_programada, creado_en) DESC NULLS LAST, id DESC
+        LIMIT $1
+        `,
+        [limit]
+    );
+
+    return resultado.rows;
+}
+
+
+// =========================
+// CERRAR PROYECTO
+// =========================
+
+async function cerrarProyecto(id) {
+    const resultado = await pool.query(
+        `
+        UPDATE proyectos_mtto
+        SET estado = 'Cerrado'
+        WHERE id = $1
+          AND COALESCE(LOWER(estado), 'abierto') NOT IN ('cerrado', 'completado', 'cancelado', 'finalizado')
+        RETURNING id
+        `,
+        [id]
+    );
+
+    return resultado.rows.length > 0;
+}
+
+
+module.exports = {
+    registrarProyecto,
+    listarProyectosAbiertos,
+    cerrarProyecto
+};

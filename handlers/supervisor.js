@@ -14,7 +14,11 @@ const {
     listarRiesgos
 } = require('../services/pendientes');
 
-const { registrarProyecto }  = require('../services/proyectos');
+const {
+    registrarProyecto,
+    listarProyectosAbiertos,
+    cerrarProyecto
+} = require('../services/proyectos');
 const {
     obtenerResumenOperativo,
     construirMensajeResumenOperativo
@@ -55,6 +59,7 @@ const {
     aprobarPermiso,
     reportePermisosDelMes,
     reportePermisosPersona,
+    listarPermisosPendientes,
     listarDeudasPendientes
 } = require('../services/permisos-workflow');
 const {
@@ -102,7 +107,7 @@ const COMANDOS = [
     'ALERTAS', 'ALERTAS ASISTENCIA',
     'ASISTENCIA', 'ASISTENCIA HOY', 'EN TURNO', 'EN SITIO',
     'RESUMEN ASISTENCIA', 'MARCADOR', 'MARCADOR ASISTENCIA',
-    'RIESGOS', 'PROYECTOS'
+    'RIESGOS', 'PROYECTOS', 'LISTAR PROYECTOS'
 ];
 
 const GRUPO_ASISTENCIA_INGENIERIA = 'Asistencia SHP1 Pachuca';
@@ -234,6 +239,19 @@ function formatearLineaPreventivo(p) {
     const lineaOCRRaw = extraerLineaOCRDesdeObservaciones(p.observaciones);
     const lineaOCR = formatearLineaOCRPreventivo(lineaOCRRaw);
     return `[${p.id}] ${icono} ${p.prioridad} | ${area} | ${descripcion}${lineaOCR ? `\n${lineaOCR}` : ''}`;
+}
+
+function formatearLineaProyecto(p) {
+    const icono =
+        p.prioridad === 'ALTA' ? '🔴' :
+        p.prioridad === 'MEDIA' ? '🟡' : '🟢';
+
+    const area = p.area || 'SHP1';
+    const estado = p.estado || 'Abierto';
+    const nombre = limpiarTextoPlano(p.nombre || 'Proyecto sin nombre');
+    const descripcion = limpiarTextoPlano(p.descripcion || 'Sin descripción').slice(0, 100);
+
+    return `[${p.id}] ${icono} ${p.prioridad || 'MEDIA'} | ${estado} | ${area}\n${nombre}\n${descripcion}`;
 }
 
 function normalizarDescripcionPreventivo(descripcion = '') {
@@ -2232,11 +2250,14 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
 ✅ HABILITADO
 • Registro guiado: pendientes y proyectos.
 • Registro libre: PENDIENTE:, PROYECTO:.
-• Cierre: CERRAR <ID> y CERRAR PREVENTIVO <ID>.
+• Cierre: CERRAR <ID>, CERRAR PREVENTIVO <ID>, CERRAR PROYECTO <ID>.
 • Consultas: LISTAR, ABIERTOS, CERRADOS, COMPLETADOS, HISTORICO.
+• Limpieza/permisos: LISTAR (incluye permisos pendientes), ABIERTOS (incluye conteo), PERMISOS LIMITES.
+• Resolver permisos: CONFIRMAR PERMISO <ID> | TIPO | [DD/MM/YYYY], APROBAR PERMISO <ID>.
 • Preventivos: LISTAR PREVENTIVOS, PREVENTIVOS CERRADOS.
 • Asistencia: ASISTENCIA, ASISTENCIA HOY, EN TURNO, MARCADOR, RESUMEN ASISTENCIA.
 • Alertas: ALERTAS, ALERTAS ASISTENCIA.
+• Deudas de turno doble: ALERTAS DEUDAS.
 • Reporte: REPORTE, RESUMEN OPERATIVO.
 • Evidencias: fotos ligadas al último registro del autor.
 
@@ -2275,8 +2296,13 @@ FOTOS:
 Después de registrar, envía una o varias imágenes para ligar evidencia al pendiente.
 
 ━━━━━━━━━━━━━━━
-LISTAR — Muestra pendientes abiertos.
+LISTAR — Muestra pendientes, preventivos, proyectos y permisos de limpieza pendientes.
+ABIERTOS — Totales de pendientes/preventivos/permisos pendientes.
 CERRAR <ID> — Ejemplo: CERRAR 42
+PERMISOS PENDIENTES:
+CONFIRMAR PERMISO <ID> | DESCUENTO SUELDO
+CONFIRMAR PERMISO <ID> | CAMBIO DESCANSO | DD/MM/YYYY
+APROBAR PERMISO <ID>
 CANCELAR — Cancela guía activa`);
         return;
     }
@@ -2309,6 +2335,10 @@ COSTO:
 
 FOTOS:
 Después de registrar, envía una o varias imágenes para ligar evidencia al proyecto.
+
+CONSULTA/CIERRE:
+LISTAR PROYECTOS — Muestra proyectos abiertos.
+CERRAR PROYECTO <ID> — Cierra un proyecto abierto.
 
 CANCELAR — Cancela guía activa`);
         return;
@@ -2476,7 +2506,9 @@ HISTORICO PREVENTIVOS — Alias de preventivos cerrados.`);
     if (desc === 'ABIERTOS') {
         const total = await contarAbiertos();
         const preventivos = await listarPreventivosPendientes();
-        await message.reply(`📋 Pendientes abiertos: ${total}\n🛠️ Preventivos abiertos: ${preventivos.length}`);
+        const permisosPendientes = await listarPermisosPendientes(pool, 100);
+        const totalPermisosPendientes = permisosPendientes?.ok ? (permisosPendientes.total || 0) : 0;
+        await message.reply(`📋 Pendientes abiertos: ${total}\n🛠️ Preventivos abiertos: ${preventivos.length}\n🧹 Permisos limpieza pendientes: ${totalPermisosPendientes}`);
         return;
     }
 
@@ -2530,6 +2562,22 @@ HISTORICO PREVENTIVOS — Alias de preventivos cerrados.`);
         return;
     }
 
+    if (desc === 'PROYECTOS' || desc === 'LISTAR PROYECTOS') {
+        const rows = await listarProyectosAbiertos(25);
+        let respuesta = '🏗️ PROYECTOS ABIERTOS\n\n';
+
+        rows.forEach((p) => {
+            respuesta += `${formatearLineaProyecto(p)}\n\n`;
+        });
+
+        if (rows.length === 0) {
+            respuesta = '✅ No hay proyectos abiertos';
+        }
+
+        await message.reply(respuesta);
+        return;
+    }
+
     // =========================
     // CERRAR PREVENTIVO
     // =========================
@@ -2546,6 +2594,21 @@ HISTORICO PREVENTIVOS — Alias de preventivos cerrados.`);
         } else {
             await message.reply(`⚠️ Preventivo ${idPendiente} no encontrado o ya cerrado`);
             console.log(`⚠️ Preventivo ${idPendiente} no encontrado o ya cerrado`);
+        }
+
+        return;
+    }
+
+    const cerrarProyectoMatch = descripcion.match(/^(DONE|CERRAR)\s+PROYECTO\s+(\d+)$/i);
+
+    if (cerrarProyectoMatch) {
+        const idProyecto = cerrarProyectoMatch[2];
+        const cerrado = await cerrarProyecto(idProyecto);
+
+        if (cerrado) {
+            await message.reply(`✅ Proyecto ${idProyecto} cerrado`);
+        } else {
+            await message.reply(`⚠️ Proyecto ${idProyecto} no encontrado o ya cerrado`);
         }
 
         return;
@@ -2581,6 +2644,8 @@ HISTORICO PREVENTIVOS — Alias de preventivos cerrados.`);
         const pendientesGenerales = rows.filter((p) => (p.categoria || '').toUpperCase() !== 'PREVENTIVO');
         const preventivosRaw = await listarPreventivosPendientes();
         const preventivos = ordenarPreventivosPorCategoria(preventivosRaw);
+        const proyectos = await listarProyectosAbiertos(15);
+        const permisosPendientes = await listarPermisosPendientes(pool, 15);
         let respuesta = '📋 PENDIENTES ABIERTOS\n\n';
 
         pendientesGenerales.forEach(p => {
@@ -2600,6 +2665,30 @@ HISTORICO PREVENTIVOS — Alias de preventivos cerrados.`);
 
             preventivos.forEach(p => {
                 respuesta += `${formatearLineaPreventivo(p)}\n\n`;
+            });
+        }
+
+        if (proyectos.length > 0) {
+            respuesta += '\n🏗️ PROYECTOS ABIERTOS\n\n';
+
+            proyectos.forEach((p) => {
+                respuesta += `${formatearLineaProyecto(p)}\n\n`;
+            });
+        }
+
+        if (permisosPendientes?.ok && permisosPendientes.total > 0) {
+            respuesta += '\n🧹 PERMISOS LIMPIEZA PENDIENTES\n\n';
+
+            permisosPendientes.permisos.forEach((permiso) => {
+                const tipo = (permiso.tipo_permiso || 'PENDIENTE_DEFINIR').replace(/_/g, ' ');
+                const motivo = limpiarTextoPlano(permiso.motivo || 'Sin motivo');
+                const persona = permiso.persona_key || '-';
+                const fechaPermiso = permiso.fecha ? moment(permiso.fecha).format('DD/MM') : '-';
+
+                respuesta +=
+                    `[${permiso.id}] ${fechaPermiso} | ${persona} | ${tipo}\n` +
+                    `${motivo}\n` +
+                    `Accion: APROBAR PERMISO ${permiso.id}\n\n`;
             });
         }
 

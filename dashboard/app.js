@@ -44,6 +44,7 @@ const els = {
     modalPrev: document.getElementById('modal-prev'),
     modalNext: document.getElementById('modal-next'),
     modalCounter: document.getElementById('modal-counter'),
+    homeTopIndicators: document.getElementById('home-top-indicators'),
     kpiBitacora: document.getElementById('kpi-bitacora'),
     kpiLimpieza: document.getElementById('kpi-limpieza'),
     kpiPendientes: document.getElementById('kpi-pendientes'),
@@ -469,7 +470,100 @@ function normalizarTexto(valor = '') {
         .trim();
 }
 
-function renderPrincipalListado({ summary, pendientes, asistenciaLimpieza, asistenciaMtto, estadoAsistencia, preventivos, alertasAsistencia }) {
+function toSafeNumber(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : 0;
+}
+
+function fmtNum(value) {
+    return toSafeNumber(value).toLocaleString('es-MX');
+}
+
+function sumarCampo(items = [], campo = '') {
+    return (items || []).reduce((acc, item) => acc + toSafeNumber(item?.[campo]), 0);
+}
+
+function construirResumenMensualLimpieza(data) {
+    const items = data?.items || [];
+    return {
+        personas: items.length,
+        dias: sumarCampo(items, 'dias_con_asistencia'),
+        reportes: sumarCampo(items, 'total_reportes'),
+        evidencias: sumarCampo(items, 'total_evidencias')
+    };
+}
+
+function construirResumenMensualMtto(data) {
+    const items = data?.items || [];
+    return {
+        personas: items.length,
+        dias: sumarCampo(items, 'dias_con_asistencia'),
+        reportes: sumarCampo(items, 'total_reportes'),
+        evidencias: sumarCampo(items, 'total_evidencias')
+    };
+}
+
+function construirResumenMttoHoy(data) {
+    const items = data?.items || [];
+    const resumen = { A: 0, D: 0, P: 0, R: 0, F: 0 };
+
+    items.forEach((item) => {
+        const estado = (item?.estado || '').toString().toUpperCase();
+        if (!Object.prototype.hasOwnProperty.call(resumen, estado)) {
+            resumen.F += 1;
+            return;
+        }
+        resumen[estado] += 1;
+    });
+
+    return {
+        total: items.length,
+        asistencia: resumen.A,
+        descanso: resumen.D,
+        permiso: resumen.P,
+        retardo: resumen.R,
+        falta: resumen.F
+    };
+}
+
+function esProyectoAbierto(estado = '') {
+    const e = normalizarTexto(estado || 'abierto');
+    return !['cerrado', 'completado', 'cancelado', 'finalizado'].includes(e);
+}
+
+function renderHomeImpactIndicators({ pendientesHoy = 0, alertasHoy = 0, mttoEnTurnoHoy = 0, limpiezaEnTurnoHoy = 0, proyectosActivos = 0 }) {
+    return `
+        <section class="home-impact-row">
+            <button class="home-impact-card critical" type="button" data-home-tab="supervisor" data-home-scope="pendientes">
+                <span class="home-impact-label">Urgente MTTO</span>
+                <strong>${fmtNum(pendientesHoy)}</strong>
+                <small>Pendientes abiertos hoy</small>
+            </button>
+            <button class="home-impact-card warning" type="button" data-home-tab="supervisor" data-home-scope="alertas">
+                <span class="home-impact-label">Alertas activas</span>
+                <strong>${fmtNum(alertasHoy)}</strong>
+                <small>Asistencia fuera de tolerancia</small>
+            </button>
+            <button class="home-impact-card mtto" type="button" data-home-tab="supervisor" data-home-scope="asistencia" data-home-supervisor-asistencia-scope="hoy">
+                <span class="home-impact-label">MTTO en turno</span>
+                <strong>${fmtNum(mttoEnTurnoHoy)}</strong>
+                <small>Cobertura actual de ingenieria</small>
+            </button>
+            <button class="home-impact-card limpieza" type="button" data-home-tab="limpieza" data-home-limpieza-view="asistencia" data-home-asistencia-scope="diaria">
+                <span class="home-impact-label">Limpieza en turno</span>
+                <strong>${fmtNum(limpiezaEnTurnoHoy)}</strong>
+                <small>Cobertura actual de limpieza</small>
+            </button>
+            <button class="home-impact-card projects" type="button" data-home-tab="supervisor" data-home-scope="proyectos">
+                <span class="home-impact-label">Proyectos activos</span>
+                <strong>${fmtNum(proyectosActivos)}</strong>
+                <small>Seguimiento de implementación</small>
+            </button>
+        </section>
+    `;
+}
+
+function renderPrincipalListado({ summary, pendientes, asistenciaLimpieza, asistenciaMtto, estadoAsistencia, preventivos, alertasAsistencia, limpiezaMensual, mttoMensual, proyectosActivosCount }) {
     const pendientesAbiertos = (pendientes.items || []).filter((x) => {
         return (x.estado || '').toLowerCase() === 'pendiente';
     }).slice(0, 5);
@@ -484,11 +578,20 @@ function renderPrincipalListado({ summary, pendientes, asistenciaLimpieza, asist
     }).sort((a, b) => b.faltas - a.faltas).slice(0, 5);
 
     const topPendiente = pendientesAbiertos[0] || null;
-    const topAsistencia = asistenciaCritica[0] || null;
     const preventivosAbiertos = preventivos?.items || [];
     const alertasActivas = alertasAsistencia?.items || [];
     const indicadorLimpieza = construirIndicadorEstadoPersistido(estadoAsistencia?.limpieza || [], 'LIMPIEZA');
     const indicadorMtto = construirIndicadorEstadoPersistido(estadoAsistencia?.mantenimiento || [], 'MTTO');
+    const mensualLimpieza = construirResumenMensualLimpieza(limpiezaMensual);
+    const mensualMtto = construirResumenMensualMtto(mttoMensual);
+    const hoyMtto = construirResumenMttoHoy(asistenciaMtto);
+    const hoyLimpieza = {
+        enTurno: indicadorLimpieza.enTurno.length,
+        salida: indicadorLimpieza.salida.length,
+        fueraTurno: indicadorLimpieza.fueraTurno.length,
+        descanso: indicadorLimpieza.descanso.length,
+        permiso: indicadorLimpieza.permiso.length
+    };
 
     const maxFaltas = asistenciaCritica.length
         ? Math.max(...asistenciaCritica.map((x) => Number(x.faltas || 0)))
@@ -501,150 +604,167 @@ function renderPrincipalListado({ summary, pendientes, asistenciaLimpieza, asist
             : { code: 'VERDE', className: 'estado-a', msg: 'Operacion estable con seguimiento normal.' };
 
     const totalPreventivos = summary.pendientesPreventivos ?? 0;
+    const proyectosActivos = fmtNum(proyectosActivosCount ?? 0);
 
     return `
-        <div class="home-grid">
-            <button class="home-card home-card-green" data-home-tab="supervisor" data-home-scope="bitacora">
-                <span class="home-icon">◉</span>
-                <span class="home-title">Operación</span>
-                <strong>${summary.bitacora ?? '-'} / ${summary.limpieza ?? '-'}</strong>
-                <small>Bitácora y limpieza</small>
-            </button>
-            <button class="home-card home-card-yellow" data-home-tab="supervisor" data-home-scope="pendientes">
-                <span class="home-icon">▣</span>
-                <span class="home-title">Ingenieria de planta</span>
-                <strong>${summary.pendientesAbiertos ?? '-'} pendientes</strong>
-                <small>Actividades y preventivos</small>
-            </button>
-            <button class="home-card home-card-orange" data-home-tab="supervisor" data-home-scope="preventivos">
-                <span class="home-icon">🛠</span>
-                <span class="home-title">Preventivos</span>
-                <strong>${totalPreventivos}</strong>
-                <small>Abiertos en Ingenieria</small>
-            </button>
-            <button class="home-card home-card-blue" data-home-tab="supervisor" data-home-scope="alertas">
-                <span class="home-icon">✦</span>
-                <span class="home-title">Alertas</span>
-                <strong>${alertasActivas.length} activas</strong>
-                <small>Asistencia en seguimiento</small>
-            </button>
-            <button class="home-card home-card-ink" data-home-tab="limpieza" data-home-limpieza-view="actividades">
-                <span class="home-icon">▤</span>
-                <span class="home-title">Limpieza</span>
-                <strong>${summary.limpieza ?? '-'}</strong>
-                <small>Actividades y evidencia</small>
-            </button>
-        </div>
-
         <div class="card home-summary-card">
-            <h3>Semaforo General</h3>
+            <h3>Centro Operativo | Vista ejecutiva</h3>
             <div class="semaforo-wrap">
                 <div class="semaforo-badge ${semaforo.className}">${semaforo.code}</div>
                 <div class="semaforo-text">${semaforo.msg}</div>
             </div>
             <div class="home-metrics">
-                <span>Bitácora ${summary.bitacora ?? '-'}</span>
-                <span>Actividades ${Math.max(0, Number(summary.pendientesAbiertos || 0) - Number(summary.pendientesPreventivos || 0))}</span>
+                <span>Pendientes ${summary.pendientesAbiertos ?? '-'}</span>
                 <span>Preventivos ${summary.pendientesPreventivos ?? '-'}</span>
-                <span>Asistencia ${asistenciaCritica.length}</span>
-                <span>Proyectos ${summary.proyectos ?? '-'}</span>
+                <span>Proyectos activos ${proyectosActivos}</span>
+                <span>Alertas ${alertasActivas.length}</span>
             </div>
         </div>
 
-        <button class="card home-mini-card home-turno-card home-panel-button" type="button" data-home-tab="supervisor" data-home-scope="asistencia" data-home-supervisor-asistencia-scope="marcador">
-            <h3>Turno | Mantenimiento</h3>
-            <div class="home-turno-grid">
-                <div class="home-turno-item ok">En turno: <b>${indicadorMtto.enTurno.length}</b></div>
-                <div class="home-turno-item warn">Salida: <b>${indicadorMtto.salida.length}</b></div>
-                <div class="home-turno-item warn">Fuera de turno: <b>${indicadorMtto.fueraTurno.length}</b></div>
-                <div class="home-turno-item rest">Descanso: <b>${indicadorMtto.descanso.length}</b></div>
-                <div class="home-turno-item perm">Permiso: <b>${indicadorMtto.permiso.length}</b></div>
-            </div>
-            <div class="home-mini-line">
-                ${indicadorMtto.enTurno.length ? `Asistencia SHP1 Pachuca: ${indicadorMtto.enTurno.slice(0, 3).join(', ')}` : indicadorMtto.salida.length ? `Salida registrada: ${indicadorMtto.salida.slice(0, 3).join(', ')}` : indicadorMtto.permiso.length ? `Permiso autorizado: ${indicadorMtto.permiso.slice(0, 3).join(', ')}` : 'Sin activos con reporte hoy en Asistencia SHP1 Pachuca.'}
-            </div>
-        </button>
+        <section class="home-dual-layout">
+            <article class="card home-area home-area-mtto">
+                <div class="home-area-head">
+                    <div>
+                        <h3>Mantenimiento (MTTO)</h3>
+                        <p>Operacion de ingenieria sin mezclar con limpieza.</p>
+                    </div>
+                    <span class="home-live-pill">Tiempo real</span>
+                </div>
 
-        <button class="card home-mini-card home-turno-card home-panel-button" type="button" data-home-tab="limpieza" data-home-limpieza-view="asistencia" data-home-asistencia-scope="marcador">
-            <h3>Turno | Limpieza</h3>
-            <div class="home-turno-grid">
-                <div class="home-turno-item ok">En turno: <b>${indicadorLimpieza.enTurno.length}</b></div>
-                <div class="home-turno-item warn">Salida: <b>${indicadorLimpieza.salida.length}</b></div>
-                <div class="home-turno-item warn">Fuera de turno: <b>${indicadorLimpieza.fueraTurno.length}</b></div>
-                <div class="home-turno-item rest">Descanso: <b>${indicadorLimpieza.descanso.length}</b></div>
-                <div class="home-turno-item perm">Permiso: <b>${indicadorLimpieza.permiso.length}</b></div>
-            </div>
-            <div class="home-mini-line">
-                ${indicadorLimpieza.enTurno.length
-                    ? `MELI SVC PACHUCA - BATIA LIMPIEZA: ${indicadorLimpieza.enTurno.slice(0, 3).join(', ')}`
-                    : indicadorLimpieza.salida.length
-                        ? `MELI SVC PACHUCA - BATIA LIMPIEZA: salida registrada ${indicadorLimpieza.salida.slice(0, 3).join(', ')}`
-                        : indicadorLimpieza.permiso.length
-                            ? `MELI SVC PACHUCA - BATIA LIMPIEZA: permiso autorizado ${indicadorLimpieza.permiso.slice(0, 3).join(', ')}`
-                        : indicadorLimpieza.descanso.length
-                            ? `MELI SVC PACHUCA - BATIA LIMPIEZA: descanso programado ${indicadorLimpieza.descanso.slice(0, 3).join(', ')}`
-                            : 'MELI SVC PACHUCA - BATIA LIMPIEZA: sin activos con reporte en el turno actual.'}
-            </div>
-        </button>
+                <div class="home-area-kpis">
+                    <button class="home-kpi-card" type="button" data-home-tab="supervisor" data-home-scope="pendientes">
+                        <small>Hoy</small>
+                        <strong>${fmtNum(summary.pendientesAbiertos ?? 0)}</strong>
+                        <span>Pendientes abiertos</span>
+                    </button>
+                    <button class="home-kpi-card" type="button" data-home-tab="supervisor" data-home-scope="preventivos">
+                        <small>Hoy</small>
+                        <strong>${fmtNum(totalPreventivos)}</strong>
+                        <span>Preventivos</span>
+                    </button>
+                    <button class="home-kpi-card" type="button" data-home-tab="supervisor" data-home-scope="asistencia" data-home-supervisor-asistencia-scope="hoy">
+                        <small>Hoy</small>
+                        <strong>${fmtNum(hoyMtto.asistencia)}</strong>
+                        <span>Asistencia en tiempo</span>
+                    </button>
+                    <button class="home-kpi-card" type="button" data-home-tab="supervisor" data-home-scope="asistencia" data-home-supervisor-asistencia-scope="mensual">
+                        <small>Mes actual</small>
+                        <strong>${fmtNum(mensualMtto.reportes)}</strong>
+                        <span>Reportes MTTO</span>
+                    </button>
+                </div>
 
-        <button class="card home-mini-card home-alert-card home-panel-button" type="button" data-home-tab="supervisor" data-home-scope="alertas">
-            <h3>Alertas activas | Asistencia</h3>
-            <div class="home-list-mini">
-                ${alertasActivas.length
-                    ? alertasActivas.slice(0, 4).map((item) => `
-                        <div class="home-list-item alert-item">
-                            <b>${item.persona}</b>
-                            <span>${item.turno} · ${item.minutosAtraso} min de atraso</span>
-                            <small>${item.grupo}</small>
-                        </div>
-                    `).join('')
-                    : '<div class="home-list-empty">Sin alertas activas de asistencia.</div>'}
-            </div>
-        </button>
+                <div class="home-area-strip">
+                    <span>En turno: <b>${indicadorMtto.enTurno.length}</b></span>
+                    <span>Salida: <b>${indicadorMtto.salida.length}</b></span>
+                    <span>Descanso: <b>${indicadorMtto.descanso.length}</b></span>
+                    <span>Permiso: <b>${indicadorMtto.permiso.length}</b></span>
+                    <span>Evidencias mes: <b>${fmtNum(mensualMtto.evidencias)}</b></span>
+                </div>
 
-        <button class="card home-help-card home-panel-button" type="button" data-home-tab="supervisor" data-home-scope="preventivos">
-            <h3>Preventivos abiertos</h3>
-            <div class="home-mini-line">${totalPreventivos} pendientes de tipo preventivo</div>
-            <div class="home-mini-line">Se cierran solo desde WhatsApp con <b>CERRAR PREVENTIVO &lt;ID&gt;</b></div>
-        </button>
+                <div class="home-actions-grid">
+                    <button class="home-action-btn" type="button" data-home-tab="supervisor" data-home-scope="asistencia" data-home-supervisor-asistencia-scope="marcador">Marcador asistencia MTTO</button>
+                    <button class="home-action-btn" type="button" data-home-tab="supervisor" data-home-scope="preventivos">Preventivos abiertos</button>
+                    <button class="home-action-btn" type="button" data-home-tab="supervisor" data-home-scope="alertas">Alertas de asistencia</button>
+                    <button class="home-action-btn" type="button" data-home-tab="supervisor" data-home-scope="proyectos">Proyectos activos</button>
+                </div>
 
-        <button class="card home-mini-card home-panel-button" type="button" data-home-tab="supervisor" data-home-scope="preventivos">
-            <h3>Lista de preventivos</h3>
-            <div class="home-list-mini">
-                ${preventivosAbiertos.length
-                    ? preventivosAbiertos.slice(0, 3).map((item) => `
-                        <div class="home-list-item">
-                            <b>[${item.id}] ${item.prioridad || '-'}</b>
-                            <span>${(item.descripcion || '-').slice(0, 110)}</span>
-                            <small>${item.area || 'SHP1'}</small>
-                        </div>
-                    `).join('')
-                    : '<div class="home-list-empty">Sin preventivos abiertos.</div>'}
-            </div>
-        </button>
+                <div class="home-list-mini">
+                    ${preventivosAbiertos.length
+                        ? preventivosAbiertos.slice(0, 3).map((item) => `
+                            <div class="home-list-item">
+                                <b>[${item.id}] ${item.prioridad || '-'}</b>
+                                <span>${(item.descripcion || '-').slice(0, 110)}</span>
+                                <small>${item.area || 'SHP1'}</small>
+                            </div>
+                        `).join('')
+                        : '<div class="home-list-empty">Sin preventivos abiertos.</div>'}
+                </div>
+            </article>
 
-        <button class="card home-mini-card home-panel-button" type="button" data-home-tab="supervisor" data-home-scope="pendientes">
-            <h3>Pendiente clave</h3>
-            <div class="home-mini-line">${topPendiente ? `#${topPendiente.id} · ${topPendiente.area || '-'} · ${topPendiente.prioridad || '-'}` : 'Sin pendientes abiertos relevantes.'}</div>
-        </button>
+            <article class="card home-area home-area-limpieza">
+                <div class="home-area-head">
+                    <div>
+                        <h3>Limpieza</h3>
+                        <p>Seguimiento diario y mensual del equipo de limpieza.</p>
+                    </div>
+                    <span class="home-live-pill">Tiempo real</span>
+                </div>
 
-        <button class="card home-mini-card home-panel-button" type="button" data-home-tab="limpieza" data-home-limpieza-view="asistencia" data-home-asistencia-scope="marcador">
-            <h3>Asistencia crítica</h3>
-            <div class="home-mini-line">${topAsistencia ? `${topAsistencia.persona || '-'} · ${topAsistencia.turno || '-'} · ${topAsistencia.faltas} faltas` : 'Sin datos de asistencia.'}</div>
-        </button>
+                <div class="home-area-kpis">
+                    <button class="home-kpi-card" type="button" data-home-tab="limpieza" data-home-limpieza-view="actividades">
+                        <small>Hoy</small>
+                        <strong>${fmtNum(summary.limpieza ?? 0)}</strong>
+                        <span>Actividades</span>
+                    </button>
+                    <button class="home-kpi-card" type="button" data-home-tab="limpieza" data-home-limpieza-view="asistencia" data-home-asistencia-scope="diaria">
+                        <small>Hoy</small>
+                        <strong>${fmtNum(hoyLimpieza.enTurno)}</strong>
+                        <span>En turno</span>
+                    </button>
+                    <button class="home-kpi-card" type="button" data-home-tab="limpieza" data-home-limpieza-view="asistencia" data-home-asistencia-scope="mensual">
+                        <small>Mes actual</small>
+                        <strong>${fmtNum(mensualLimpieza.reportes)}</strong>
+                        <span>Reportes limpieza</span>
+                    </button>
+                    <button class="home-kpi-card" type="button" data-home-tab="limpieza" data-home-limpieza-view="asistencia" data-home-asistencia-scope="mensual">
+                        <small>Mes actual</small>
+                        <strong>${fmtNum(mensualLimpieza.evidencias)}</strong>
+                        <span>Evidencias limpieza</span>
+                    </button>
+                </div>
 
-        <button class="card home-mini-card home-panel-button" type="button" data-home-tab="supervisor" data-home-scope="proyectos">
-            <h3>Ingenieria rapido</h3>
-            <div class="home-mini-line">Proyectos ${summary.proyectos ?? '-'}</div>
-        </button>
+                <div class="home-area-strip">
+                    <span>Salida: <b>${hoyLimpieza.salida}</b></span>
+                    <span>Fuera turno: <b>${hoyLimpieza.fueraTurno}</b></span>
+                    <span>Descanso: <b>${hoyLimpieza.descanso}</b></span>
+                    <span>Permiso: <b>${hoyLimpieza.permiso}</b></span>
+                    <span>Personas mes: <b>${fmtNum(mensualLimpieza.personas)}</b></span>
+                </div>
 
-        <div class="card home-help-card">
-            <h3>Ayuda Centro de Operaciones</h3>
-            <div class="home-help-grid">
-                <div class="home-help-item"><b>Preventivos</b><span>Usa Ingenieria de planta > Preventivos para los abiertos y Ingenieria de planta > Completados para historico.</span></div>
-                <div class="home-help-item"><b>Asistencia</b><span>La vista principal muestra en-turno, fuera y descanso con base en Asistencia SHP1 Pachuca.</span></div>
-            </div>
-        </div>
+                <div class="home-actions-grid">
+                    <button class="home-action-btn" type="button" data-home-tab="limpieza" data-home-limpieza-view="asistencia" data-home-asistencia-scope="marcador">Marcador asistencia limpieza</button>
+                    <button class="home-action-btn" type="button" data-home-tab="limpieza" data-home-limpieza-view="asistencia" data-home-asistencia-scope="semanal">Asistencia semanal</button>
+                    <button class="home-action-btn" type="button" data-home-tab="limpieza" data-home-limpieza-view="asistencia" data-home-asistencia-scope="mensual">Asistencia mensual</button>
+                    <button class="home-action-btn" type="button" data-home-tab="limpieza" data-home-limpieza-view="actividades">Bitacora limpieza</button>
+                </div>
+
+                <div class="home-list-mini">
+                    ${asistenciaCritica.length
+                        ? asistenciaCritica.slice(0, 3).map((item) => `
+                            <div class="home-list-item alert-item">
+                                <b>${item.persona}</b>
+                                <span>${item.turno || '-'} · faltas: ${item.faltas}</span>
+                                <small>Seguimiento de asistencia</small>
+                            </div>
+                        `).join('')
+                        : '<div class="home-list-empty">Sin incidencias de asistencia para limpieza.</div>'}
+                </div>
+            </article>
+        </section>
+
+        <section class="home-bottom-grid">
+            <button class="card home-mini-card home-alert-card home-panel-button" type="button" data-home-tab="supervisor" data-home-scope="alertas">
+                <h3>Alertas activas de asistencia</h3>
+                <div class="home-list-mini">
+                    ${alertasActivas.length
+                        ? alertasActivas.slice(0, 4).map((item) => `
+                            <div class="home-list-item alert-item">
+                                <b>${item.persona}</b>
+                                <span>${item.turno} · ${item.minutosAtraso} min de atraso</span>
+                                <small>${item.grupo}</small>
+                            </div>
+                        `).join('')
+                        : '<div class="home-list-empty">Sin alertas activas de asistencia.</div>'}
+                </div>
+            </button>
+
+            <button class="card home-mini-card home-panel-button" type="button" data-home-tab="supervisor" data-home-scope="pendientes">
+                <h3>Pendiente clave del turno</h3>
+                <div class="home-mini-line">${topPendiente ? `#${topPendiente.id} · ${topPendiente.area || '-'} · ${topPendiente.prioridad || '-'}` : 'Sin pendientes abiertos relevantes.'}</div>
+                <div class="home-mini-line">Abrir Ingenieria > Pendientes para detalle completo.</div>
+            </button>
+        </section>
     `;
 }
 
@@ -839,31 +959,52 @@ function renderAlertasAsistenciaListado(data) {
 }
 
 async function cargarVistaPrincipal() {
-    const [summaryResp, pendientesResp, asistenciaLimpiezaResp, asistenciaMttoResp, estadoAsistenciaResp, preventivosResp, alertasResp] = await Promise.all([
+    const monthRange = getMonthRangeMx();
+    const [summaryResp, pendientesResp, asistenciaLimpiezaResp, asistenciaMttoResp, estadoAsistenciaResp, preventivosResp, alertasResp, limpiezaMensualResp, mttoMensualResp, proyectosResp] = await Promise.all([
         apiFetch('/api/v1/summary'),
         apiFetch('/api/v1/supervisor/pendientes?page=1&pageSize=25'),
         apiFetch('/api/v1/limpieza/asistencia-marcador?page=1&pageSize=50'),
         apiFetch('/api/v1/ingenieria/asistencia-hoy?page=1&pageSize=50'),
         apiFetch('/api/v1/asistencia/estado-hoy'),
         apiFetch('/api/v1/supervisor/preventivos?page=1&pageSize=10'),
-        apiFetch('/api/v1/supervisor/asistencia-alertas?page=1&pageSize=50')
+        apiFetch('/api/v1/supervisor/asistencia-alertas?page=1&pageSize=50'),
+        apiFetch(`/api/v1/limpieza/asistencia-mensual?from=${monthRange.from}&to=${monthRange.to}&page=1&pageSize=100`),
+        apiFetch(`/api/v1/ingenieria/asistencia-mensual?from=${monthRange.from}&to=${monthRange.to}&page=1&pageSize=100`),
+        apiFetch('/api/v1/supervisor/proyectos?page=1&pageSize=200')
     ]);
 
-    if (!summaryResp.ok || !pendientesResp.ok || !asistenciaLimpiezaResp.ok || !asistenciaMttoResp.ok || !estadoAsistenciaResp.ok || !preventivosResp.ok || !alertasResp.ok) {
+    if (!summaryResp.ok || !pendientesResp.ok || !asistenciaLimpiezaResp.ok || !asistenciaMttoResp.ok || !estadoAsistenciaResp.ok || !preventivosResp.ok || !alertasResp.ok || !limpiezaMensualResp.ok || !mttoMensualResp.ok || !proyectosResp.ok) {
         throw new Error('No se pudo cargar la vista principal');
     }
 
-    const [summary, pendientes, asistenciaLimpieza, asistenciaMtto, estadoAsistencia, preventivos, alertasAsistencia] = await Promise.all([
+    const [summary, pendientes, asistenciaLimpieza, asistenciaMtto, estadoAsistencia, preventivos, alertasAsistencia, limpiezaMensual, mttoMensual, proyectos] = await Promise.all([
         summaryResp.json(),
         pendientesResp.json(),
         asistenciaLimpiezaResp.json(),
         asistenciaMttoResp.json(),
         estadoAsistenciaResp.json(),
         preventivosResp.json(),
-        alertasResp.json()
+        alertasResp.json(),
+        limpiezaMensualResp.json(),
+        mttoMensualResp.json(),
+        proyectosResp.json()
     ]);
 
-    els.listado.innerHTML = renderPrincipalListado({ summary, pendientes, asistenciaLimpieza, asistenciaMtto, estadoAsistencia, preventivos, alertasAsistencia });
+    const indicadorLimpieza = construirIndicadorEstadoPersistido(estadoAsistencia?.limpieza || [], 'LIMPIEZA');
+    const indicadorMtto = construirIndicadorEstadoPersistido(estadoAsistencia?.mantenimiento || [], 'MTTO');
+    const proyectosActivosCount = (proyectos?.items || []).filter((p) => esProyectoAbierto(p?.estado)).length;
+
+    if (els.homeTopIndicators) {
+        els.homeTopIndicators.innerHTML = renderHomeImpactIndicators({
+            pendientesHoy: summary.pendientesAbiertos ?? 0,
+            alertasHoy: (alertasAsistencia?.items || []).length,
+            mttoEnTurnoHoy: indicadorMtto.enTurno.length,
+            limpiezaEnTurnoHoy: indicadorLimpieza.enTurno.length,
+            proyectosActivos: proyectosActivosCount
+        });
+    }
+
+    els.listado.innerHTML = renderPrincipalListado({ summary, pendientes, asistenciaLimpieza, asistenciaMtto, estadoAsistencia, preventivos, alertasAsistencia, limpiezaMensual, mttoMensual, proyectosActivosCount });
     els.status.textContent = 'Vista principal actualizada.';
     els.pageInfo.textContent = 'Principal';
 }
@@ -1467,13 +1608,18 @@ ${item.observaciones || 'Sin observaciones'}</div>
 
 async function cargarResumen() {
     try {
-        const resp = await apiFetch('/api/v1/summary');
+        const [resp, proyectosResp] = await Promise.all([
+            apiFetch('/api/v1/summary'),
+            apiFetch('/api/v1/supervisor/proyectos?page=1&pageSize=200')
+        ]);
         const data = await resp.json();
+        const proyectos = proyectosResp.ok ? await proyectosResp.json() : { items: [] };
+        const proyectosActivosCount = (proyectos.items || []).filter((p) => esProyectoAbierto(p?.estado)).length;
 
         els.kpiBitacora.textContent = data.bitacora ?? '-';
         els.kpiLimpieza.textContent = data.limpieza ?? '-';
         els.kpiPendientes.textContent = data.pendientesAbiertos ?? '-';
-        els.kpiProyectos.textContent = data.proyectos ?? '-';
+        els.kpiProyectos.textContent = proyectosActivosCount;
     } catch (err) {
         console.error(err);
     }
@@ -1801,6 +1947,10 @@ function syncUiByTab() {
 
     if (els.paginationWrap) {
         els.paginationWrap.hidden = isPrincipal;
+    }
+
+    if (els.homeTopIndicators) {
+        els.homeTopIndicators.hidden = !isPrincipal;
     }
 
     if (isPrincipal) {

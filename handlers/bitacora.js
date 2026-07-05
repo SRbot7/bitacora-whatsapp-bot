@@ -12,6 +12,9 @@ const {
     claveMemoria
 } = require('../lib/memoria');
 const { logPersistencia } = require('../lib/persistence-log');
+const {
+    guardarMovimientosInsumosBitacora
+} = require('../services/bitacora-insumos');
 
 const COMANDOS_GUIA_BITACORA = [
     'GUIA BITACORA',
@@ -182,6 +185,10 @@ Sin pendientes
 TECNICO:
 Nombre del tecnico
 
+INSUMOS:
+- SALIDA | Cinchos | 20 pzas | Conveyor
+- ENTRADA | Pintura amarilla | 2 lt | Reposicion
+
 Comandos utiles:
 - GUIA BITACORA: inicia captura guiada
 - CANCELAR o SALIR: cancela captura guiada
@@ -234,7 +241,9 @@ Comandos utiles:
             `${datos.actividad}`,
             'PENDIENTES:',
             `${datos.pendientes}`,
-            `TECNICO: ${datos.tecnico}`
+            `TECNICO: ${datos.tecnico}`,
+            'INSUMOS:',
+            'Sin insumos'
         ].join('\n');
 
         guardarTextoBitacora({
@@ -246,6 +255,7 @@ Comandos utiles:
             actividad: datos.actividad,
             pendientes: datos.pendientes,
             tecnico: datos.tecnico,
+            insumos: '',
             textoOriginal: textoSintetico
         });
 
@@ -302,7 +312,7 @@ Comandos utiles:
     // PARSEAR TEXTO
     // =========================
 
-    const { turno, area, tecnico, pendientes, actividad } =
+    const { turno, area, tecnico, pendientes, actividad, insumos } =
         extraerDatosBitacora(textoOriginal, nombreAutor);
 
     console.log('\nDATOS EXTRAIDOS:');
@@ -311,6 +321,7 @@ Comandos utiles:
     console.log('Tecnico:', tecnico);
     console.log('Actividad:', actividad);
     console.log('Pendientes:', pendientes);
+    console.log('Insumos:', insumos);
 
     // =========================
     // GUARDAR TXT
@@ -325,6 +336,7 @@ Comandos utiles:
         actividad,
         pendientes,
         tecnico,
+        insumos: (insumos || []).join('\n'),
         textoOriginal
     });
 
@@ -402,13 +414,33 @@ Comandos utiles:
         console.log('✅ EVIDENCIA RELACIONADA');
     }
 
+    let totalInsumosGuardados = 0;
+    if (textoOriginal.trim() && Array.isArray(insumos) && insumos.length > 0) {
+        const guardadoInsumos = await guardarMovimientosInsumosBitacora(pool, {
+            actividadId,
+            fechaSql: fecha.format('YYYY-MM-DD HH:mm:ss'),
+            grupo: chat.name,
+            tecnico,
+            area,
+            turno,
+            mensajeId: message.id._serialized,
+            lineas: insumos
+        });
+
+        totalInsumosGuardados = Number(guardadoInsumos?.total || 0);
+        console.log('📦 Insumos guardados:', totalInsumosGuardados);
+    }
+
     if (textoOriginal.trim() && actividadId) {
-        await message.reply(
-            construirMensajeAgradecimientoBitacora({
-                tecnico,
-                idActividad: actividadId
-            })
-        );
+        const agradecimiento = construirMensajeAgradecimientoBitacora({
+            tecnico,
+            idActividad: actividadId
+        });
+        const extraInsumos = totalInsumosGuardados > 0
+            ? `\n📦 Movimientos de insumos registrados: ${totalInsumosGuardados}`
+            : '';
+
+        await message.reply(`${agradecimiento}${extraInsumos}`);
     }
 }
 

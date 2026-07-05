@@ -232,6 +232,17 @@ async function contar(sql, params = []) {
     return Number(resultado.rows[0]?.total || 0);
 }
 
+async function contarSeguro(sql, params = []) {
+    try {
+        return await contar(sql, params);
+    } catch (error) {
+        if (error?.code === '42P01') {
+            return 0;
+        }
+        throw error;
+    }
+}
+
 async function obtenerResumenOperativo({ inicioDia, finDia }) {
     const [
         bitacoraTotal,
@@ -240,6 +251,9 @@ async function obtenerResumenOperativo({ inicioDia, finDia }) {
         limpiezaHoy,
         pendientesAbiertos,
         pendientesHoy,
+        insumosMovimientosHoy,
+        insumosSalidasHoy,
+        permisosLimpiezaPendientes,
         proyectosTotal,
         proyectosHoy,
         asistenciaGeneral
@@ -283,6 +297,25 @@ async function obtenerResumenOperativo({ inicioDia, finDia }) {
             WHERE fecha >= $1
               AND fecha <= $2
         `, [inicioDia, finDia]),
+                contarSeguro(`
+                        SELECT COUNT(*)::int AS total
+                        FROM bitacora_insumos_movimientos
+                        WHERE fecha >= $1
+                            AND fecha <= $2
+                `, [inicioDia, finDia]),
+                contarSeguro(`
+                        SELECT COUNT(*)::int AS total
+                        FROM bitacora_insumos_movimientos
+                        WHERE tipo_mov = 'SALIDA'
+                            AND fecha >= $1
+                            AND fecha <= $2
+                `, [inicioDia, finDia]),
+                contar(`
+                        SELECT COUNT(*)::int AS total
+                        FROM asistencia_limpieza_ajustes
+                        WHERE tipo = 'PERMISO'
+                            AND upper(motivo) LIKE '%[ESTADO:PENDIENTE_APROBACION]%'
+                `),
         contar(`
             SELECT COUNT(*)::int AS total
             FROM proyectos_mtto
@@ -303,6 +336,9 @@ async function obtenerResumenOperativo({ inicioDia, finDia }) {
         limpiezaHoy,
         pendientesAbiertos,
         pendientesHoy,
+        insumosMovimientosHoy,
+        insumosSalidasHoy,
+        permisosLimpiezaPendientes,
         proyectosTotal,
         proyectosHoy,
         asistenciaGeneral
@@ -319,6 +355,7 @@ function construirMensajeResumenOperativo({ momento, resumen, tipo }) {
         'BITACORA',
         `- Hoy: ${resumen.bitacoraHoy}`,
         `- Total: ${resumen.bitacoraTotal}`,
+        `- Movimientos de insumos hoy: ${resumen.insumosMovimientosHoy || 0} (salidas: ${resumen.insumosSalidasHoy || 0})`,
         '',
         'LIMPIEZA',
         `- Hoy: ${resumen.limpiezaHoy}`,
@@ -327,6 +364,7 @@ function construirMensajeResumenOperativo({ momento, resumen, tipo }) {
         'SUPERVISOR',
         `- Pendientes abiertos: ${resumen.pendientesAbiertos}`,
         `- Pendientes creados hoy: ${resumen.pendientesHoy}`,
+        `- Permisos limpieza pendientes: ${resumen.permisosLimpiezaPendientes || 0}`,
         `- Proyectos hoy / total: ${resumen.proyectosHoy} / ${resumen.proyectosTotal}`,
         '',
         'ASISTENCIA GENERAL',

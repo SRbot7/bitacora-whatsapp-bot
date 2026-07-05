@@ -421,6 +421,43 @@ async function reportePermisosPersona(pool, personaKey, limite = 15) {
     }
 }
 
+async function listarPermisosPendientes(pool, limite = 20) {
+    try {
+        const res = await pool.query(
+            `SELECT
+                id, fecha, persona_key, motivo, creado_por, updated_at
+             FROM asistencia_limpieza_ajustes
+             WHERE tipo = 'PERMISO'
+               AND upper(motivo) LIKE '%[ESTADO:${ESTADOS.PENDIENTE}]%'
+             ORDER BY fecha ASC, id ASC
+             LIMIT $1`,
+            [limite]
+        );
+
+        const permisos = res.rows
+            .map((row) => {
+                const meta = extractMetaFromMotivo(row.motivo);
+                return {
+                    ...row,
+                    tipo_permiso: meta.tipoPermiso,
+                    estado: meta.estado,
+                    motivo: meta.motivoLimpio,
+                    fecha_pago: meta.fechaPago || null
+                };
+            })
+            .filter((row) => row.estado === ESTADOS.PENDIENTE);
+
+        return {
+            ok: true,
+            permisos,
+            total: permisos.length
+        };
+    } catch (error) {
+        console.error('❌ Error listarPermisosPendientes:', error);
+        return { ok: false, error: error.message, permisos: [], total: 0 };
+    }
+}
+
 // ============================================
 // E) TRACKING DE DEUDA (PAGO CON OTRO DÍA)
 // ============================================
@@ -508,6 +545,7 @@ module.exports = {
     aprobarPermiso,
     reportePermisosDelMes,
     reportePermisosPersona,
+    listarPermisosPendientes,
     registrarDeudaPago,
     listarDeudasPendientes
 };
