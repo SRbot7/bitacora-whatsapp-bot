@@ -47,7 +47,6 @@ const els = {
     kpiBitacora: document.getElementById('kpi-bitacora'),
     kpiLimpieza: document.getElementById('kpi-limpieza'),
     kpiPendientes: document.getElementById('kpi-pendientes'),
-    kpiMateriales: document.getElementById('kpi-materiales'),
     kpiProyectos: document.getElementById('kpi-proyectos')
 };
 
@@ -273,7 +272,6 @@ function buildParams() {
         if (state.scope === 'pendientes') params.set('estado', extra);
         if (state.scope === 'preventivos') params.set('estado', extra);
         if (state.scope === 'completados') params.set('prioridad', extra);
-        if (state.scope === 'materiales') params.set('estado', extra);
         if (state.scope === 'proyectos') params.set('estado', extra);
     }
 
@@ -360,7 +358,6 @@ function getEndpoint() {
     }
     if (state.tab === 'supervisor' && state.scope === 'preventivos') return '/api/v1/supervisor/preventivos';
     if (state.tab === 'supervisor' && state.scope === 'completados') return '/api/v1/supervisor/completados';
-    if (state.scope === 'materiales') return '/api/v1/supervisor/materiales';
     if (state.scope === 'proyectos') return '/api/v1/supervisor/proyectos';
     return '/api/v1/supervisor/pendientes';
 }
@@ -550,7 +547,6 @@ function renderPrincipalListado({ summary, pendientes, asistenciaLimpieza, asist
                 <span>Actividades ${Math.max(0, Number(summary.pendientesAbiertos || 0) - Number(summary.pendientesPreventivos || 0))}</span>
                 <span>Preventivos ${summary.pendientesPreventivos ?? '-'}</span>
                 <span>Asistencia ${asistenciaCritica.length}</span>
-                <span>Materiales ${summary.materiales ?? '-'}</span>
                 <span>Proyectos ${summary.proyectos ?? '-'}</span>
             </div>
         </div>
@@ -637,9 +633,9 @@ function renderPrincipalListado({ summary, pendientes, asistenciaLimpieza, asist
             <div class="home-mini-line">${topAsistencia ? `${topAsistencia.persona || '-'} · ${topAsistencia.turno || '-'} · ${topAsistencia.faltas} faltas` : 'Sin datos de asistencia.'}</div>
         </button>
 
-        <button class="card home-mini-card home-panel-button" type="button" data-home-tab="supervisor" data-home-scope="materiales">
+        <button class="card home-mini-card home-panel-button" type="button" data-home-tab="supervisor" data-home-scope="proyectos">
             <h3>Ingenieria rapido</h3>
-            <div class="home-mini-line">Materiales ${summary.materiales ?? '-'} · Proyectos ${summary.proyectos ?? '-'}</div>
+            <div class="home-mini-line">Proyectos ${summary.proyectos ?? '-'}</div>
         </button>
 
         <div class="card home-help-card">
@@ -684,7 +680,7 @@ function renderSupervisorAsistenciaListado(data) {
             : `Dia ${formatFechaCorta(data.fecha)}`;
 
     const rows = items.map((x) => {
-        const estadoClass = x.estado === 'A' ? 'estado-a' : (x.estado === 'P' ? 'estado-p' : (x.estado === 'R' ? 'estado-r' : 'estado-f'));
+        const meta = metaEstadoAsistencia(x.estado);
         const estadoLabel = x.estado === 'A'
             ? 'Asistencia en tiempo'
             : x.estado === 'P'
@@ -694,16 +690,21 @@ function renderSupervisorAsistenciaListado(data) {
                 : 'Sin asistencia';
 
         return `
-            <div class="asistencia-row">
-                <div class="asistencia-col persona">${x.persona || '-'}</div>
-                <div class="asistencia-col estado">
-                    <span class="asistencia-chip ${estadoClass}" title="${estadoLabel}">${x.estado}</span>
+            <article class="asistencia-person-card asistencia-person-card-wide">
+                <div class="asistencia-person-top">
+                    <div>
+                        <div class="asistencia-person-name">${x.persona || '-'}</div>
+                        <div class="asistencia-person-meta">${x.puesto || '-'} · ${x.turno || '-'}</div>
+                    </div>
+                    <span class="asistencia-chip ${meta.className}" title="${estadoLabel}">${x.estado}</span>
                 </div>
-                <div class="asistencia-col numero">${x.total_reportes ?? 0}</div>
-                <div class="asistencia-col numero">${x.total_evidencias ?? 0}</div>
-                <div class="asistencia-col hora">${x.turno || '-'}</div>
-                <div class="asistencia-col hora">${x.puesto || '-'}</div>
-            </div>
+                <div class="asistencia-person-stats">
+                    <div><small>Estado</small><b>${meta.label}</b></div>
+                    <div><small>Reportes</small><b>${x.total_reportes ?? 0}</b></div>
+                    <div><small>Evidencias</small><b>${x.total_evidencias ?? 0}</b></div>
+                    <div><small>Periodo</small><b>${periodLabel}</b></div>
+                </div>
+            </article>
         `;
     }).join('');
 
@@ -713,25 +714,12 @@ function renderSupervisorAsistenciaListado(data) {
     const totalF = items.filter((x) => x.estado === 'F').length;
 
     return `
-        <div class="asistencia-legend">
-            <span class="asistencia-chip estado-a">A</span> Asistencia
-            <span class="asistencia-chip estado-p">P</span> Permiso
-            <span class="asistencia-chip estado-r">R</span> Retardo
-            <span class="asistencia-chip estado-f">F</span> Falta
-        </div>
-        <div class="status">${periodLabel} | A: ${totalA} | P: ${totalP} | R: ${totalR} | F: ${totalF}</div>
-        <section class="asistencia-day">
-            <h3>Ingenieria de Planta | Asistencia ${periodLabel}</h3>
-            <div class="asistencia-row asistencia-head">
-                <div class="asistencia-col persona">Persona</div>
-                <div class="asistencia-col estado">Estado</div>
-                <div class="asistencia-col numero">Reportes</div>
-                <div class="asistencia-col numero">Evidencias</div>
-                <div class="asistencia-col hora">Turno</div>
-                <div class="asistencia-col hora">Puesto</div>
-            </div>
-            ${rows}
-        </section>
+        ${renderAsistenciaHeaderVisual({
+            title: 'Ingenieria de planta | Asistencia',
+            subtitle: periodLabel,
+            counts: { A: totalA, D: 0, P: totalP, R: totalR, F: totalF }
+        })}
+        <div class="asistencia-cards-grid">${rows}</div>
     `;
 }
 
@@ -889,7 +877,227 @@ function obtenerEstadoAsistencia(item) {
     return { code: 'A', label: 'Asistencia OK', className: 'estado-a' };
 }
 
-function renderAsistenciaListado(items) {
+function metaEstadoAsistencia(estado = '') {
+    if (estado === 'A') return { className: 'estado-a', label: 'Asistencia' };
+    if (estado === 'D') return { className: 'estado-d', label: 'Descanso' };
+    if (estado === 'P') return { className: 'estado-p', label: 'Permiso' };
+    if (estado === 'R') return { className: 'estado-r', label: 'Retardo' };
+    return { className: 'estado-f', label: 'Falta' };
+}
+
+function renderAsistenciaHeaderVisual({ title = 'Asistencia', subtitle = '', counts = {} }) {
+    const a = Number(counts.A || 0);
+    const d = Number(counts.D || 0);
+    const p = Number(counts.P || 0);
+    const r = Number(counts.R || 0);
+    const f = Number(counts.F || 0);
+
+    return `
+        <section class="asistencia-hero">
+            <div class="asistencia-hero-head">
+                <h3>${title}</h3>
+                <div class="section-subtitle">${subtitle}</div>
+            </div>
+            <div class="asistencia-kpi-grid">
+                <div class="asistencia-kpi asistencia-kpi-a"><span>A</span><strong>${a}</strong><small>Asistencia</small></div>
+                <div class="asistencia-kpi asistencia-kpi-d"><span>D</span><strong>${d}</strong><small>Descanso</small></div>
+                <div class="asistencia-kpi asistencia-kpi-p"><span>P</span><strong>${p}</strong><small>Permiso</small></div>
+                <div class="asistencia-kpi asistencia-kpi-r"><span>R</span><strong>${r}</strong><small>Retardo</small></div>
+                <div class="asistencia-kpi asistencia-kpi-f"><span>F</span><strong>${f}</strong><small>Falta</small></div>
+            </div>
+        </section>
+    `;
+}
+
+function toDateOnlyIsoSafe(value) {
+    if (!value) return '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) {
+        return String(value);
+    }
+
+    const dt = new Date(value);
+    if (Number.isNaN(dt.getTime())) {
+        return '';
+    }
+
+    return dt.toISOString().slice(0, 10);
+}
+
+function startOfWeekMondayIso(value) {
+    const base = parseIsoDateUtcNoon(toDateOnlyIsoSafe(value));
+    if (!base) {
+        return getWeekRangeMx().weekStart;
+    }
+
+    const dayIndex = (base.getUTCDay() + 6) % 7;
+    base.setUTCDate(base.getUTCDate() - dayIndex);
+    return formatIsoDate(base);
+}
+
+function listWeekStartsBetween(fromIso, toIso) {
+    const fromBase = parseIsoDateUtcNoon(toDateOnlyIsoSafe(fromIso));
+    const toBase = parseIsoDateUtcNoon(toDateOnlyIsoSafe(toIso));
+    if (!fromBase || !toBase) {
+        return [getWeekRangeMx().weekStart];
+    }
+
+    const weekStarts = [];
+    let current = parseIsoDateUtcNoon(startOfWeekMondayIso(fromIso));
+    const end = parseIsoDateUtcNoon(startOfWeekMondayIso(toIso));
+
+    while (current && end && current.getTime() <= end.getTime()) {
+        weekStarts.push(formatIsoDate(current));
+        current.setUTCDate(current.getUTCDate() + 7);
+    }
+
+    return weekStarts;
+}
+
+async function fetchMarcadorLimpiezaWeek(weekStart) {
+    const qs = new URLSearchParams();
+    qs.set('page', '1');
+    qs.set('pageSize', '100');
+    qs.set('weekStart', weekStart);
+
+    const resp = await apiFetch(`/api/v1/limpieza/asistencia-marcador?${qs.toString()}`);
+    if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}`);
+    }
+
+    return resp.json();
+}
+
+function buildDescansosByDayFromMarcador(marcadorData, fromIso = '', toIso = '') {
+    const from = toDateOnlyIsoSafe(fromIso);
+    const to = toDateOnlyIsoSafe(toIso);
+    const map = new Map();
+
+    for (const item of (marcadorData?.items || [])) {
+        for (const dia of (item.marcador || [])) {
+            if (dia.estado !== 'D') continue;
+
+            const fecha = toDateOnlyIsoSafe(dia.fecha);
+            if (!fecha) continue;
+            if (from && fecha < from) continue;
+            if (to && fecha > to) continue;
+
+            if (!map.has(fecha)) {
+                map.set(fecha, []);
+            }
+
+            map.get(fecha).push(item.persona || '-');
+        }
+    }
+
+    return map;
+}
+
+function renderDescansosPanel({ title = 'Descansos', descansosByDay = new Map() }) {
+    const fechas = Array.from(descansosByDay.keys()).sort();
+    const bloques = fechas.map((fecha) => {
+        const personas = (descansosByDay.get(fecha) || []).sort((a, b) => a.localeCompare(b, 'es-MX'));
+        const chips = personas.length
+            ? personas.map((nombre) => `<span class="descanso-chip">${nombre}</span>`).join('')
+            : '<span class="descanso-empty-mini">Sin descanso</span>';
+
+        return `
+            <article class="descanso-day-card">
+                <div class="descanso-day-top">
+                    <strong>${formatFechaCorta(fecha)}</strong>
+                    <span class="descanso-day-count">${personas.length}</span>
+                </div>
+                <div class="descanso-chip-cloud">${chips}</div>
+            </article>
+        `;
+    }).join('');
+
+    if (!bloques) {
+        return `
+            <section class="descanso-board">
+                <div class="descanso-board-head">
+                    <h3>${title}</h3>
+                </div>
+                <div class="descanso-empty">Sin descansos</div>
+            </section>
+        `;
+    }
+
+    return `
+        <section class="descanso-board">
+            <div class="descanso-board-head">
+                <h3>${title}</h3>
+            </div>
+            <div class="descanso-days-grid">
+                ${bloques}
+            </div>
+        </section>
+    `;
+}
+
+async function buildDescansosPanelForLimpieza(scope, params) {
+    const from = params.get('from') || '';
+    const to = params.get('to') || '';
+
+    if (scope === 'marcador') {
+        return '';
+    }
+
+    if (scope === 'diaria') {
+        const fechaObjetivo = toDateOnlyIsoSafe(from || to || getMxTodayIso());
+        const weekStart = startOfWeekMondayIso(fechaObjetivo);
+        const marcador = await fetchMarcadorLimpiezaWeek(weekStart);
+        const byDay = buildDescansosByDayFromMarcador(marcador, fechaObjetivo, fechaObjetivo);
+        return renderDescansosPanel({
+            title: `Descansan hoy (${formatFechaCorta(fechaObjetivo)})`,
+            descansosByDay: byDay
+        });
+    }
+
+    if (scope === 'semanal') {
+        const weekStart = params.get('weekStart') || startOfWeekMondayIso(from || getWeekRangeMx().from);
+        const marcador = await fetchMarcadorLimpiezaWeek(toDateOnlyIsoSafe(weekStart));
+        const byDay = buildDescansosByDayFromMarcador(marcador, from, to);
+        return renderDescansosPanel({
+            title: 'Descansos semanales',
+            descansosByDay: byDay
+        });
+    }
+
+    if (scope === 'mensual') {
+        const monthRange = getMonthRangeMx();
+        const start = toDateOnlyIsoSafe(from || monthRange.from);
+        const end = toDateOnlyIsoSafe(to || monthRange.to);
+        const weekStarts = listWeekStartsBetween(start, end);
+        const acumulado = new Map();
+
+        for (const weekStart of weekStarts) {
+            const marcador = await fetchMarcadorLimpiezaWeek(weekStart);
+            const byDay = buildDescansosByDayFromMarcador(marcador, start, end);
+
+            for (const [fecha, personas] of byDay.entries()) {
+                if (!acumulado.has(fecha)) {
+                    acumulado.set(fecha, []);
+                }
+
+                acumulado.get(fecha).push(...personas);
+            }
+        }
+
+        for (const [fecha, personas] of acumulado.entries()) {
+            const unicos = Array.from(new Set(personas));
+            acumulado.set(fecha, unicos);
+        }
+
+        return renderDescansosPanel({
+            title: 'Descansos mensuales',
+            descansosByDay: acumulado
+        });
+    }
+
+    return '';
+}
+
+function renderAsistenciaListado(items, descansosHtml = '') {
     if (!items.length) {
         return '';
     }
@@ -905,46 +1113,48 @@ function renderAsistenciaListado(items) {
     }
 
     const bloques = [];
+    const global = { A: 0, D: 0, P: 0, R: 0, F: 0 };
 
     for (const [fechaLabel, rows] of grupos.entries()) {
         const filas = rows.map((item) => {
             const estado = obtenerEstadoAsistencia(item);
+            global[estado.code] += 1;
             return `
-                <div class="asistencia-row">
-                    <div class="asistencia-col persona">${item.autor || '-'}</div>
-                    <div class="asistencia-col estado">
+                <article class="asistencia-person-card">
+                    <div class="asistencia-person-top">
+                        <div>
+                            <div class="asistencia-person-name">${item.autor || '-'}</div>
+                            <div class="asistencia-person-meta">${formatFecha(item.fecha)}</div>
+                        </div>
                         <span class="asistencia-chip ${estado.className}" title="${estado.label}">${estado.code}</span>
                     </div>
-                    <div class="asistencia-col numero">${item.total_reportes ?? 0}</div>
-                    <div class="asistencia-col numero">${item.total_evidencias ?? 0}</div>
-                    <div class="asistencia-col hora">${formatFecha(item.primer_reporte)}</div>
-                    <div class="asistencia-col hora">${formatFecha(item.ultimo_reporte)}</div>
-                </div>
+                    <div class="asistencia-person-stats">
+                        <div><small>Reportes</small><b>${item.total_reportes ?? 0}</b></div>
+                        <div><small>Evidencias</small><b>${item.total_evidencias ?? 0}</b></div>
+                        <div><small>Primer registro</small><b>${formatFecha(item.primer_reporte)}</b></div>
+                        <div><small>Ultimo registro</small><b>${formatFecha(item.ultimo_reporte)}</b></div>
+                    </div>
+                </article>
             `;
         }).join('');
 
         bloques.push(`
             <section class="asistencia-day">
                 <h3>${fechaLabel}</h3>
-                <div class="asistencia-row asistencia-head">
-                    <div class="asistencia-col persona">Elemento</div>
-                    <div class="asistencia-col estado">Estado</div>
-                    <div class="asistencia-col numero">Reportes</div>
-                    <div class="asistencia-col numero">Evidencias</div>
-                    <div class="asistencia-col hora">Primer registro</div>
-                    <div class="asistencia-col hora">Ultimo registro</div>
+                <div class="asistencia-cards-grid">
+                    ${filas}
                 </div>
-                ${filas}
             </section>
         `);
     }
 
     return `
-        <div class="asistencia-legend">
-            <span class="asistencia-chip estado-a">A</span> Asistencia OK
-            <span class="asistencia-chip estado-r">R</span> Sin evidencia
-            <span class="asistencia-chip estado-f">F</span> Sin registro
-        </div>
+        ${renderAsistenciaHeaderVisual({
+            title: 'Limpieza | Asistencia diaria',
+            subtitle: 'Vista visual por persona y fecha.',
+            counts: global
+        })}
+        ${descansosHtml}
         ${bloques.join('')}
     `;
 }
@@ -1000,7 +1210,7 @@ function renderAsistenciaSemanalListado(items) {
     `;
 }
 
-function renderAsistenciaAgrupadaListado(data) {
+function renderAsistenciaAgrupadaListado(data, descansosHtml = '') {
     const items = data?.items || [];
     if (!items.length) {
         return '';
@@ -1013,6 +1223,8 @@ function renderAsistenciaAgrupadaListado(data) {
     const startLabel = formatFechaCorta(rangeStart);
     const endLabel = formatFechaCorta(rangeEnd);
 
+    const global = { A: 0, D: 0, P: 0, R: 0, F: 0 };
+
     const bloques = items.map((item) => {
         const dias = Number(item.dias_con_asistencia || 0);
         const estado = dias >= 6
@@ -1020,44 +1232,39 @@ function renderAsistenciaAgrupadaListado(data) {
             : dias >= 3
                 ? { code: 'R', label: 'Asistencia media', className: 'estado-r' }
                 : { code: 'F', label: 'Asistencia baja', className: 'estado-f' };
+        global[estado.code] += 1;
 
         const periodoInicio = item.semana_inicio || item.mes_inicio || item.periodo_inicio || item.periodoInicio || rangeStart;
         const periodoFin = item.semana_fin || item.mes_fin || item.periodo_fin || item.periodoFin || rangeEnd;
         const ultimoPeriodo = item.ultimo_reporte_semana || item.ultimo_reporte_mes || item.ultimo_reporte_periodo || item.ultimo_reporte;
 
         return `
-            <section class="asistencia-day">
-                <h3>${item.autor || '-'} | ${title} ${formatFechaCorta(periodoInicio)} - ${formatFechaCorta(periodoFin)}</h3>
-                <div class="asistencia-row asistencia-head">
-                    <div class="asistencia-col persona">Elemento</div>
-                    <div class="asistencia-col estado">Estado</div>
-                    <div class="asistencia-col numero">Dias</div>
-                    <div class="asistencia-col numero">Reportes</div>
-                    <div class="asistencia-col numero">Evidencias</div>
-                    <div class="asistencia-col hora">Ultimo registro</div>
-                </div>
-                <div class="asistencia-row">
-                    <div class="asistencia-col persona">${item.autor || '-'}</div>
-                    <div class="asistencia-col estado">
-                        <span class="asistencia-chip ${estado.className}" title="${estado.label}">${estado.code}</span>
+            <article class="asistencia-person-card asistencia-person-card-wide">
+                <div class="asistencia-person-top">
+                    <div>
+                        <div class="asistencia-person-name">${item.autor || '-'}</div>
+                        <div class="asistencia-person-meta">${title} ${formatFechaCorta(periodoInicio)} - ${formatFechaCorta(periodoFin)}</div>
                     </div>
-                    <div class="asistencia-col numero">${dias}</div>
-                    <div class="asistencia-col numero">${item.total_reportes ?? 0}</div>
-                    <div class="asistencia-col numero">${item.total_evidencias ?? 0}</div>
-                    <div class="asistencia-col hora">${formatFecha(ultimoPeriodo)}</div>
+                    <span class="asistencia-chip ${estado.className}" title="${estado.label}">${estado.code}</span>
                 </div>
-            </section>
+                <div class="asistencia-person-stats">
+                    <div><small>Dias con asistencia</small><b>${dias}</b></div>
+                    <div><small>Reportes</small><b>${item.total_reportes ?? 0}</b></div>
+                    <div><small>Evidencias</small><b>${item.total_evidencias ?? 0}</b></div>
+                    <div><small>Ultimo registro</small><b>${formatFecha(ultimoPeriodo)}</b></div>
+                </div>
+            </article>
         `;
     }).join('');
 
     return `
-        <div class="asistencia-legend">
-            <span class="asistencia-chip estado-a">A</span> 6+ dias
-            <span class="asistencia-chip estado-r">R</span> 3-5 dias
-            <span class="asistencia-chip estado-f">F</span> 0-2 dias
-        </div>
-        <div class="status">${title}: ${startLabel} - ${endLabel}</div>
-        ${bloques}
+        ${renderAsistenciaHeaderVisual({
+            title: `Limpieza | Asistencia ${isMonthly ? 'mensual' : 'semanal'}`,
+            subtitle: `${title}: ${startLabel} - ${endLabel}`,
+            counts: global
+        })}
+        ${descansosHtml}
+        <div class="asistencia-cards-grid">${bloques}</div>
     `;
 }
 
@@ -1115,6 +1322,12 @@ function renderAsistenciaMarcadorListado(data) {
         `;
     }).join('');
 
+    const descansosByDay = buildDescansosByDayFromMarcador(data, data.weekStart, data.weekEnd);
+    const descansosHtml = renderDescansosPanel({
+        title: 'Descansos de la semana (Marcador)',
+        descansosByDay
+    });
+
     return `
         <div class="asistencia-legend">
             <span class="asistencia-chip estado-a">A</span> Asistencia
@@ -1123,6 +1336,7 @@ function renderAsistenciaMarcadorListado(data) {
             <span class="asistencia-chip estado-r">R</span> Retardo
             <span class="asistencia-chip estado-f">F</span> Falta
         </div>
+        ${descansosHtml}
         <div class="status">Semana: ${formatFechaCorta(data.weekStart)} - ${formatFechaCorta(data.weekEnd)}</div>
         <div class="marcador-wrap">
             <table class="marcador-table">
@@ -1133,6 +1347,7 @@ function renderAsistenciaMarcadorListado(data) {
                         ${headDias}
                         <th>A</th>
                         <th>D</th>
+                        <th>P</th>
                         <th>R</th>
                         <th>F</th>
                     </tr>
@@ -1234,24 +1449,6 @@ ${item.observaciones || 'Sin observaciones'}</div>
         `;
     }
 
-    if (state.scope === 'materiales') {
-        return `
-            <div class="card">
-                <h3>Material #${item.id}</h3>
-                <div class="meta">
-                    <div><b>Solicitante:</b> ${item.solicitante || '-'}</div>
-                    <div><b>Prioridad:</b> ${item.prioridad || '-'}</div>
-                    <div><b>Estado:</b> ${item.estado || '-'}</div>
-                    <div><b>Fecha:</b> ${formatFecha(item.fecha)}</div>
-                </div>
-                <div class="block-text"><b>Material</b>\n${item.material || '-'}</div>
-                <div class="block-text"><b>Justificacion</b>\n${item.justificacion || '-'}</div>
-                <button data-evid-sup-mat="${item.id}">Ver evidencias</button>
-                <div class="evidencias" id="evid-sup-mat-${item.id}"></div>
-            </div>
-        `;
-    }
-
     return `
         <div class="card">
             <h3>Proyecto #${item.id}</h3>
@@ -1276,7 +1473,6 @@ async function cargarResumen() {
         els.kpiBitacora.textContent = data.bitacora ?? '-';
         els.kpiLimpieza.textContent = data.limpieza ?? '-';
         els.kpiPendientes.textContent = data.pendientesAbiertos ?? '-';
-        els.kpiMateriales.textContent = data.materiales ?? '-';
         els.kpiProyectos.textContent = data.proyectos ?? '-';
     } catch (err) {
         console.error(err);
@@ -1305,12 +1501,17 @@ async function cargarListado() {
         state.page = Math.min(state.page, state.totalPages);
 
         if (state.tab === 'limpieza' && state.limpiezaView === 'asistencia') {
+            const scope = state.asistenciaScope === 'hoy' ? 'diaria' : state.asistenciaScope;
+            const descansosHtml = (scope === 'diaria' || scope === 'semanal' || scope === 'mensual')
+                ? await buildDescansosPanelForLimpieza(scope, params)
+                : '';
+
             if (state.asistenciaScope === 'semanal' || state.asistenciaScope === 'mensual') {
-                els.listado.innerHTML = renderAsistenciaAgrupadaListado(data);
+                els.listado.innerHTML = renderAsistenciaAgrupadaListado(data, descansosHtml);
             } else if (state.asistenciaScope === 'marcador') {
                 els.listado.innerHTML = renderAsistenciaMarcadorListado(data);
             } else {
-                els.listado.innerHTML = renderAsistenciaListado(data.items || []);
+                els.listado.innerHTML = renderAsistenciaListado(data.items || [], descansosHtml);
             }
         } else if (state.tab === 'supervisor' && state.scope === 'alertas') {
             els.listado.innerHTML = renderAlertasAsistenciaListado(data);
@@ -1369,7 +1570,6 @@ async function conectarEventosEvidencias() {
     const bitBtns = document.querySelectorAll('[data-evid]');
     const limpBtns = document.querySelectorAll('[data-evid-limp]');
     const supPendBtns = document.querySelectorAll('[data-evid-sup-pend]');
-    const supMatBtns = document.querySelectorAll('[data-evid-sup-mat]');
     const supProyBtns = document.querySelectorAll('[data-evid-sup-proy]');
 
     for (const btn of bitBtns) {
@@ -1438,33 +1638,6 @@ async function conectarEventosEvidencias() {
             }
 
             const r = await apiFetch(`/api/v1/supervisor/pendientes/${id}/evidencias`);
-            const evidencias = await r.json();
-            const urls = evidencias.map((x) => toPublicImageUrl(x.ruta));
-
-            wrap.innerHTML = urls.map((url, idx) => `
-                <img class="thumb" src="${url}" alt="evidencia" data-modal-url="${url}" data-modal-index="${idx}">
-            `).join('');
-
-            wrap.querySelectorAll('[data-modal-url]').forEach((img) => {
-                img.onclick = () => abrirModal(urls, Number.parseInt(img.dataset.modalIndex, 10));
-            });
-
-            btn.textContent = 'Ocultar evidencias';
-        };
-    }
-
-    for (const btn of supMatBtns) {
-        btn.onclick = async () => {
-            const id = btn.getAttribute('data-evid-sup-mat');
-            const wrap = document.getElementById(`evid-sup-mat-${id}`);
-
-            if (wrap.innerHTML.trim()) {
-                wrap.innerHTML = '';
-                btn.textContent = 'Ver evidencias';
-                return;
-            }
-
-            const r = await apiFetch(`/api/v1/supervisor/materiales/${id}/evidencias`);
             const evidencias = await r.json();
             const urls = evidencias.map((x) => toPublicImageUrl(x.ruta));
 

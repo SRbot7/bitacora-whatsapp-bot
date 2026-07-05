@@ -43,12 +43,16 @@ const DESCANSOS_FIJOS_PERSONAL = {
     jose_luis: [5]
 };
 
+// Primer turno: rotacion semanal +1 sobre [viernes(4), sabado(5), domingo(6)].
+// Ejemplo de avance semanal: quien descansa en domingo pasa a viernes,
+// quien descansa en sabado pasa a domingo y quien descansa en viernes pasa a sabado.
 const DESCANSOS_ROTACION_PRIMER_TURNO = {
-    4: ['yuri', 'lucy', 'hugo'],
-    5: ['hugo', 'yuri', 'lucy'],
-    6: ['lucy', 'hugo', 'yuri']
+    4: ['lucy', 'yuri', 'hugo'],
+    5: ['hugo', 'lucy', 'yuri'],
+    6: ['yuri', 'hugo', 'lucy']
 };
 
+// Segundo turno: descanso de sabado/domingo se intercambia cada semana.
 const DESCANSOS_ROTACION_SEGUNDO_TURNO = {
     5: ['margarita', 'gloria'],
     6: ['gloria', 'margarita']

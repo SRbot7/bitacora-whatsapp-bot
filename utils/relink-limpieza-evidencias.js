@@ -81,7 +81,6 @@ async function getUsedRoutes() {
         'evidencias_mtto',
         'evidencias_limpieza',
         'evidencias_pendientes',
-        'evidencias_materiales',
         'evidencias_proyectos'
     ];
 

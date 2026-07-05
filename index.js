@@ -33,6 +33,15 @@ function normalizarNombreGrupo(nombre = '') {
         .toLowerCase();
 }
 
+function obtenerFechaMensajeMx(message) {
+    const tsRaw = Number(message?.timestamp || message?._data?.t || 0);
+    if (Number.isFinite(tsRaw) && tsRaw > 0) {
+        return moment.unix(tsRaw).tz('America/Mexico_City');
+    }
+
+    return moment().tz('America/Mexico_City');
+}
+
 
 
 // =========================
@@ -67,11 +76,16 @@ const COMANDOS_CONTROL_BOT = new Set([
     'BOT RESET',
     'BOT STATUS', 'BOT ESTADO'
 ]);
+const VENTANA_PREVENTIVO_CO_MS = Math.max(
+    60 * 1000,
+    Number.parseInt(process.env.PREVENTIVO_CO_VENTANA_MS || `${3 * 60 * 1000}`, 10) || (3 * 60 * 1000)
+);
 
 let schedulerReportesId = null;
 let schedulerEstadosAsistenciaId = null;
 const reporteEnviadoHoy = {};
 const alertaAsistenciaEnviada = {};
+const pendientesPreventivoCO = {};
 let botPausado = false;
 let botPausadoAt = null;
 let botPausadoPor = '';
@@ -97,9 +111,56 @@ function esSolicitudPreventivoEnSupervisor(texto = '') {
         comando.startsWith('PREVENTIVO ') ||
         comando.includes('ORDEN PREVENTIVA') ||
         comando.includes('PREVENTIVO SEMANAL') ||
+        comando === 'SHP1' ||
         comando.startsWith('OP SHP1') ||
         comandoCompacto.startsWith('OPSHP1')
     );
+}
+
+function obtenerClaveAutorMensaje({ message, nombreAutor = '' }) {
+    const autor = (message?.author || message?.from || nombreAutor || 'sin-autor')
+        .toString()
+        .trim()
+        .toLowerCase();
+
+    return autor || 'sin-autor';
+}
+
+function obtenerClavePendientePreventivoCO({ chat, message, nombreAutor = '' }) {
+    const chatKey = (chat?.id?._serialized || chat?.name || 'sin-chat').toString().trim();
+    const autorKey = obtenerClaveAutorMensaje({ message, nombreAutor });
+    return `${chatKey}::${autorKey}`;
+}
+
+function limpiarPendientesPreventivoCO() {
+    const ahora = Date.now();
+    Object.keys(pendientesPreventivoCO).forEach((clave) => {
+        const item = pendientesPreventivoCO[clave];
+        if (!item || (ahora - item.createdAtMs) > VENTANA_PREVENTIVO_CO_MS) {
+            delete pendientesPreventivoCO[clave];
+        }
+    });
+}
+
+function registrarPendientePreventivoCO({ clave, messageSafe, chatSafe, fecha }) {
+    pendientesPreventivoCO[clave] = {
+        messageSafe,
+        chatSafe,
+        fecha,
+        createdAtMs: Date.now()
+    };
+}
+
+function tomarPendientePreventivoCO(clave) {
+    limpiarPendientesPreventivoCO();
+
+    const item = pendientesPreventivoCO[clave];
+    if (!item) {
+        return null;
+    }
+
+    delete pendientesPreventivoCO[clave];
+    return item;
 }
 
 function esEntradaOperativaSupervisorDesdePropio(texto = '') {
@@ -116,6 +177,7 @@ function esEntradaOperativaSupervisorDesdePropio(texto = '') {
         'AYUDA', 'AYUDA GUIADA', 'GUIA AYUDA', 'AYUDA RAPIDA',
         'LISTAR', 'ABIERTOS', 'CERRADOS',
         'PREVENTIVOS', 'ALERTAS', 'ALERTAS ASISTENCIA',
+        'HISTORIAL CO', 'HISTORIAL CO HOY',
         'REPORTE', 'RESUMEN', 'REPORTE OPERATIVO', 'RESUMEN OPERATIVO',
         'CANCELAR', 'SALIR',
         '1', '2',
@@ -128,6 +190,10 @@ function esEntradaOperativaSupervisorDesdePropio(texto = '') {
 
     // Comandos de presencia/falta
     if (/^MARCAR\s+PRESENTE\s*:/i.test(texto) || /^REGISTRAR\s+FALTA\s*:/i.test(texto)) {
+        return true;
+    }
+
+    if (/^HISTORIAL\s+CO\s+AUTOR\s*:/i.test(texto)) {
         return true;
     }
 
@@ -649,8 +715,15 @@ client.on('message_create', async (message) => {
         const messageSafe = crearMensajeSoloLectura(message, chat);
         const chatSafe = crearChatSoloLectura(chat);
 
-        const fecha = moment().tz('America/Mexico_City');
+        const fecha = obtenerFechaMensajeMx(message);
         const nombreAutor = message._data.notifyName || message.author || 'Sin nombre';
+        const clavePendientePreventivoCO = obtenerClavePendientePreventivoCO({
+            chat,
+            message,
+            nombreAutor
+        });
+
+        limpiarPendientesPreventivoCO();
 
         console.log('\n====================');
         console.log('📥 NUEVO MENSAJE (SOLO LECTURA)');
@@ -674,9 +747,39 @@ client.on('message_create', async (message) => {
                 });
 
                 if (intentoPreventivo?.registrado) {
+                    delete pendientesPreventivoCO[clavePendientePreventivoCO];
                     console.log('✅ Preventivo detectado desde Centro Operativo y guardado (sin respuesta).');
                     return;
                 }
+            }
+
+            if (!messageSafe.hasMedia && esSolicitudPreventivoEnSupervisor(textoOriginal)) {
+                const pendienteMedia = tomarPendientePreventivoCO(clavePendientePreventivoCO);
+                if (pendienteMedia?.messageSafe?.hasMedia) {
+                    const intentoPreventivoDiferido = await manejarPreventivos({
+                        message: pendienteMedia.messageSafe,
+                        chat: pendienteMedia.chatSafe,
+                        textoOriginal,
+                        nombreAutor,
+                        fecha: pendienteMedia.fecha,
+                        permitirFallbackEtiqueta: false
+                    });
+
+                    if (intentoPreventivoDiferido?.registrado) {
+                        console.log('✅ Preventivo detectado con imagen previa + comando posterior en CO.');
+                        return;
+                    }
+                }
+            }
+
+            if (messageSafe.hasMedia && message.type === 'image') {
+                registrarPendientePreventivoCO({
+                    clave: clavePendientePreventivoCO,
+                    messageSafe,
+                    chatSafe,
+                    fecha
+                });
+                console.log('🧠 Imagen CO guardada temporalmente para OCR preventivo (3 min).');
             }
 
             await manejarSupervisor({

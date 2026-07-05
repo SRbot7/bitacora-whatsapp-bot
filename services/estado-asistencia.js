@@ -12,13 +12,21 @@ const {
 
 const GRUPO_LIMPIEZA = 'MELI SVC PACHUCA - BATIA LIMPIEZA';
 const GRUPO_MANTENIMIENTO = 'Asistencia SHP1 Pachuca';
+const ASISTENCIA_RETARDO_MINUTOS = Math.max(
+    1,
+    Number.parseInt(process.env.ASISTENCIA_RETARDO_MINUTOS || '60', 10) || 60
+);
+const ASISTENCIA_FALTA_MINUTOS = Math.max(
+    ASISTENCIA_RETARDO_MINUTOS + 1,
+    Number.parseInt(process.env.ASISTENCIA_FALTA_MINUTOS || '120', 10) || 120
+);
 
 const EQUIPO_MANTENIMIENTO = [
     {
         key: 'saul',
         nombre: 'Saul Romero Romero',
         turno: '1er turno 07:00-15:00',
-        aliases: ['saul romero romero', 'saul romero', 'saul']
+        aliases: ['saul romero romero', 'saul romero', 'saul', 'ctamez2016b', '~ ctamez2016b']
     },
     {
         key: 'eliezer',
@@ -29,10 +37,11 @@ const EQUIPO_MANTENIMIENTO = [
     {
         key: 'flavio',
         nombre: 'Flavio Cruz Santiago',
-        turno: '3er turno 22:00-06:00',
+        turno: '3er turno 23:00-06:00',
         aliases: ['flavio cruz santiago', 'flavio cruz', 'flavio']
     }
 ];
+const MANTENIMIENTO_DESCANSO_DOMINGO_KEYS = new Set(['saul', 'eliezer', 'flavio']);
 
 let tablaCreada = false;
 
@@ -165,6 +174,7 @@ function resolverEstadoLimpieza(persona, ahoraMx, tieneRegistro, ajuste) {
     const ventana = obtenerVentanaTurno(persona, ahoraMx);
     const dentroVentana = ahoraMx.isSameOrAfter(ventana.inicio) && ahoraMx.isSameOrBefore(ventana.fin);
     const despuesDeSalida = ahoraMx.isAfter(ventana.fin);
+    const minutosDesdeInicio = Math.max(0, ahoraMx.diff(ventana.inicio, 'minutes'));
 
     if (descanso) {
         return {
@@ -186,14 +196,32 @@ function resolverEstadoLimpieza(persona, ahoraMx, tieneRegistro, ajuste) {
 
     if (despuesDeSalida) {
         return {
-            estadoTurno: tieneRegistro ? 'SALIDA' : 'FUERA_DE_TURNO',
-            detalleTurno: tieneRegistro ? 'Hora de salida cumplida' : 'Fuera de turno',
+            estadoTurno: tieneRegistro ? 'SALIDA' : 'FALTA',
+            detalleTurno: tieneRegistro ? 'Hora de salida cumplida' : 'Sin evidencia en turno (falta)',
             tieneRegistro,
             ventana
         };
     }
 
     if (dentroVentana) {
+        if (!tieneRegistro && minutosDesdeInicio > ASISTENCIA_FALTA_MINUTOS) {
+            return {
+                estadoTurno: 'FALTA',
+                detalleTurno: 'Mas de 120 min sin evidencia',
+                tieneRegistro: false,
+                ventana
+            };
+        }
+
+        if (!tieneRegistro && minutosDesdeInicio > ASISTENCIA_RETARDO_MINUTOS) {
+            return {
+                estadoTurno: 'RETARDO',
+                detalleTurno: 'Mas de 60 min sin evidencia',
+                tieneRegistro: false,
+                ventana
+            };
+        }
+
         return {
             estadoTurno: tieneRegistro ? 'EN_TURNO' : 'SIN_REGISTRO',
             detalleTurno: tieneRegistro ? 'Con registro en ventana' : 'Sin registro en ventana',
@@ -212,9 +240,25 @@ function resolverEstadoLimpieza(persona, ahoraMx, tieneRegistro, ajuste) {
 
 function resolverEstadoMantenimiento(persona, ahoraMx, tieneRegistro, ajuste) {
     const ventana = obtenerVentanaTurno(persona, ahoraMx);
+    const personaKey = (persona?.key || '').toLowerCase();
+    const aplicaReglaDomingo = MANTENIMIENTO_DESCANSO_DOMINGO_KEYS.has(personaKey);
+    const descansoDominical = aplicaReglaDomingo && (
+        personaKey === 'flavio'
+            ? ventana.inicio.isoWeekday() === 7
+            : ahoraMx.isoWeekday() === 7
+    );
     const dentroVentana = ahoraMx.isSameOrAfter(ventana.inicio) && ahoraMx.isSameOrBefore(ventana.fin);
     const despuesDeSalida = ahoraMx.isAfter(ventana.fin);
     const permiso = ajuste?.tipo === 'PERMISO';
+
+    if (descansoDominical && ajuste?.tipo !== 'LABORA') {
+        return {
+            estadoTurno: 'DESCANSO',
+            detalleTurno: 'Descanso programado (domingo)',
+            tieneRegistro: false,
+            ventana
+        };
+    }
 
     if (permiso) {
         return {

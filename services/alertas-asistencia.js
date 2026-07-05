@@ -11,6 +11,10 @@ const ALERTA_ASISTENCIA_TOLERANCIA_MIN = Math.max(
     60,
     Number.parseInt(process.env.ALERTA_ASISTENCIA_TOLERANCIA_MIN || '60', 10) || 60
 );
+const ALERTA_ASISTENCIA_FALTA_MIN = Math.max(
+    ALERTA_ASISTENCIA_TOLERANCIA_MIN + 1,
+    Number.parseInt(process.env.ALERTA_ASISTENCIA_FALTA_MIN || '120', 10) || 120
+);
 
 const GRUPO_LIMPIEZA_ALERTAS = 'MELI SVC PACHUCA - BATIA LIMPIEZA';
 const GRUPO_INGENIERIA_ALERTAS = 'Asistencia SHP1 Pachuca';
@@ -35,7 +39,7 @@ const ALERTAS_ASISTENCIA_INGENIERIA_TURNO = [
     {
         key: 'saul',
         nombre: 'Saul Romero Romero',
-        aliases: ['saul romero romero', 'saul romero', 'saul'],
+        aliases: ['saul romero romero', 'saul romero', 'saul', 'ctamez2016b', '~ ctamez2016b'],
         grupo: GRUPO_INGENIERIA_ALERTAS,
         etiqueta: 'INGENIERIA',
         fuente: 'MANTENIMIENTO_ASISTENCIA',
@@ -61,11 +65,12 @@ const ALERTAS_ASISTENCIA_INGENIERIA_TURNO = [
         grupo: GRUPO_INGENIERIA_ALERTAS,
         etiqueta: 'INGENIERIA',
         fuente: 'MANTENIMIENTO_ASISTENCIA',
-        turno: '3er turno 22:00-06:00',
-        turnoInicio: '22:00',
+        turno: '3er turno 23:00-06:00',
+        turnoInicio: '23:00',
         turnoFin: '06:00'
     }
 ];
+const INGENIERIA_DESCANSO_DOMINGO_KEYS = new Set(['saul', 'eliezer', 'flavio']);
 
 function normalizarAutor(texto = '') {
     return normalizarTexto(texto)
@@ -160,8 +165,8 @@ async function existeActividadTurnoIngenieria(pool, { persona, inicio, fin }) {
             SELECT autor
             FROM asistencia_mantenimiento_eventos
             WHERE grupo = $1
-              AND created_at >= $2
-              AND created_at <= $3
+                            AND COALESCE(evento_at, ((created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')) >= $2::timestamp
+                            AND COALESCE(evento_at, ((created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City')) <= $3::timestamp
             ORDER BY created_at DESC
             `,
             [
@@ -189,38 +194,7 @@ async function existeActividadTurnoIngenieria(pool, { persona, inicio, fin }) {
         }
     }
 
-    try {
-        const legacyRes = await pool.query(
-            `
-            SELECT autor, total_reportes, total_evidencias
-            FROM asistencia_limpieza_diaria
-            WHERE grupo = $1
-              AND fecha >= $2
-              AND fecha <= $3
-            `,
-            [
-                persona.grupo,
-                inicio.format('YYYY-MM-DD'),
-                fin.format('YYYY-MM-DD')
-            ]
-        );
-
-        return legacyRes.rows.some((row) => {
-            const autor = normalizarAutor(row.autor || '');
-            const tieneActividad = Number(row.total_reportes || 0) > 0 || Number(row.total_evidencias || 0) > 0;
-            if (!autor || !tieneActividad) {
-                return false;
-            }
-
-            return aliases.some((alias) => autor === alias || autor.includes(alias) || alias.includes(autor));
-        });
-    } catch (error) {
-        if (error && error.code === '42P01') {
-            return false;
-        }
-
-        throw error;
-    }
+    return false;
 }
 
 async function obtenerAlertasAsistenciaLimpieza(pool, ahoraInput = null) {
@@ -261,6 +235,9 @@ async function obtenerAlertasAsistenciaLimpieza(pool, ahoraInput = null) {
             continue;
         }
 
+        const minutosDesdeInicio = Math.max(0, ahoraMx.diff(ventana.inicio, 'minutes'));
+        const severidad = minutosDesdeInicio > ALERTA_ASISTENCIA_FALTA_MIN ? 'FALTA' : 'RETARDO';
+
         const reportoActividad = await existeActividadTurno(pool, {
             persona,
             inicio: ventana.inicio,
@@ -280,6 +257,8 @@ async function obtenerAlertasAsistenciaLimpieza(pool, ahoraInput = null) {
             turnoFin: persona.turnoFin,
             grupo: persona.grupo,
             toleranciaMin: ALERTA_ASISTENCIA_TOLERANCIA_MIN,
+            faltaMin: ALERTA_ASISTENCIA_FALTA_MIN,
+            severidad,
             enAlertaDesde: inicioConTolerancia.format('YYYY-MM-DD HH:mm:ss'),
             minutosAtraso: Math.max(0, ahoraMx.diff(inicioConTolerancia, 'minutes'))
         });
@@ -386,16 +365,26 @@ async function obtenerAlertasAsistenciaIngenieria(pool, ahoraInput = null) {
     const alertas = [];
 
     for (const persona of ALERTAS_ASISTENCIA_INGENIERIA_TURNO) {
+        const ventana = obtenerVentanaTurno(persona, ahoraMx);
         const ajuste = await obtenerAjusteAsistencia(pool, {
             fecha: ahoraMx.format('YYYY-MM-DD'),
             personaKey: persona.key
         });
 
+        const personaKey = (persona.key || '').toLowerCase();
+        const descansoDominical = INGENIERIA_DESCANSO_DOMINGO_KEYS.has(personaKey) && (
+            personaKey === 'flavio'
+                ? ventana.inicio.isoWeekday() === 7
+                : ahoraMx.isoWeekday() === 7
+        );
+        if (descansoDominical && ajuste?.tipo !== 'LABORA') {
+            continue;
+        }
+
         if (ajuste?.tipo === 'PERMISO') {
             continue;
         }
 
-        const ventana = obtenerVentanaTurno(persona, ahoraMx);
         if (ahoraMx.isBefore(ventana.inicio) || ahoraMx.isAfter(ventana.fin)) {
             continue;
         }
@@ -404,6 +393,9 @@ async function obtenerAlertasAsistenciaIngenieria(pool, ahoraInput = null) {
         if (ahoraMx.isBefore(inicioConTolerancia)) {
             continue;
         }
+
+        const minutosDesdeInicio = Math.max(0, ahoraMx.diff(ventana.inicio, 'minutes'));
+        const severidad = minutosDesdeInicio > ALERTA_ASISTENCIA_FALTA_MIN ? 'FALTA' : 'RETARDO';
 
         const reportoActividad = await existeActividadTurnoIngenieria(pool, {
             persona,
@@ -424,6 +416,8 @@ async function obtenerAlertasAsistenciaIngenieria(pool, ahoraInput = null) {
             turnoFin: persona.turnoFin,
             grupo: persona.grupo,
             toleranciaMin: ALERTA_ASISTENCIA_TOLERANCIA_MIN,
+            faltaMin: ALERTA_ASISTENCIA_FALTA_MIN,
+            severidad,
             enAlertaDesde: inicioConTolerancia.format('YYYY-MM-DD HH:mm:ss'),
             minutosAtraso: Math.max(0, ahoraMx.diff(inicioConTolerancia, 'minutes'))
         });

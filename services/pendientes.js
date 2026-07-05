@@ -201,22 +201,6 @@ async function listarRiesgos() {
 }
 
 
-// =========================
-// LISTAR MATERIALES (vista supervisor)
-// =========================
-
-async function listarMaterialesSupervisor() {
-    const resultado = await pool.query(`
-        SELECT id, descripcion, prioridad
-        FROM pendientes_supervisor
-        WHERE categoria = 'MATERIAL' AND estado = 'Pendiente'
-        ORDER BY fecha DESC
-    `);
-
-    return resultado.rows;
-}
-
-
 module.exports = {
     registrarPendiente,
     cerrarPendiente,
@@ -227,6 +211,5 @@ module.exports = {
     listarPreventivosPendientes,
     listarCompletadosSupervisor,
     listarPreventivosCompletados,
-    listarRiesgos,
-    listarMaterialesSupervisor
+    listarRiesgos
 };

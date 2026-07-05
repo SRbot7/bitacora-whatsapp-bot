@@ -585,6 +585,120 @@ button:hover {
     line-height: 1.4;
 }
 
+.asistencia-hero {
+    border: 1px solid rgba(52, 131, 250, 0.18);
+    border-radius: 14px;
+    background: linear-gradient(135deg, #f7fbff, #eef6ff);
+    padding: 12px;
+    margin-bottom: 10px;
+}
+
+.asistencia-hero-head h3 {
+    margin: 0;
+    color: #1f2f48;
+}
+
+.asistencia-kpi-grid {
+    margin-top: 10px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 8px;
+}
+
+.asistencia-kpi {
+    border-radius: 12px;
+    border: 1px solid rgba(31, 31, 31, 0.08);
+    background: #fff;
+    padding: 10px;
+    display: grid;
+    gap: 2px;
+}
+
+.asistencia-kpi span {
+    font-weight: 900;
+    font-size: 12px;
+}
+
+.asistencia-kpi strong {
+    font-size: 22px;
+    line-height: 1;
+}
+
+.asistencia-kpi small {
+    color: var(--ink-700);
+    font-weight: 700;
+}
+
+.asistencia-kpi-a { border-left: 4px solid #00a650; }
+.asistencia-kpi-d { border-left: 4px solid #3498db; }
+.asistencia-kpi-p { border-left: 4px solid #7e57c2; }
+.asistencia-kpi-r { border-left: 4px solid #ff9f00; }
+.asistencia-kpi-f { border-left: 4px solid #d93025; }
+
+.asistencia-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 10px;
+    padding: 10px;
+}
+
+.asistencia-person-card {
+    border: 1px solid rgba(52, 131, 250, 0.14);
+    border-radius: 12px;
+    background: linear-gradient(180deg, #ffffff, #f8fbff);
+    padding: 10px;
+}
+
+.asistencia-person-card-wide {
+    min-height: 132px;
+}
+
+.asistencia-person-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.asistencia-person-name {
+    font-weight: 800;
+    color: #1f2f48;
+}
+
+.asistencia-person-meta {
+    font-size: 12px;
+    color: var(--ink-700);
+    font-weight: 700;
+}
+
+.asistencia-person-stats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.asistencia-person-stats div {
+    border-radius: 10px;
+    background: #f3f8ff;
+    border: 1px solid rgba(52, 131, 250, 0.1);
+    padding: 8px;
+}
+
+.asistencia-person-stats small {
+    display: block;
+    color: var(--ink-500);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.asistencia-person-stats b {
+    display: block;
+    margin-top: 2px;
+    font-size: 13px;
+    color: #24364f;
+}
+
 .quick-card-green { background: linear-gradient(135deg, #00a650, #0d7a3c); }
 .quick-card-yellow { background: linear-gradient(135deg, #ff9f00, #c97b00); }
 .quick-card-blue { background: linear-gradient(135deg, #3483fa, #2968c8); }
@@ -612,6 +726,97 @@ button:hover {
     font-size: 16px;
     background: #f2f8ff;
     border-bottom: 1px solid var(--line);
+}
+
+.descanso-board {
+    border: 1px solid rgba(52, 131, 250, 0.16);
+    border-radius: 14px;
+    background: linear-gradient(180deg, #f5f9ff, #ffffff);
+    padding: 10px;
+    margin: 6px 0 12px;
+}
+
+.descanso-board-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.descanso-board-head h3 {
+    margin: 0;
+    font-size: 15px;
+    color: #1f2f48;
+}
+
+.descanso-days-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 8px;
+}
+
+.descanso-day-card {
+    border: 1px solid rgba(52, 131, 250, 0.16);
+    border-radius: 12px;
+    background: #fff;
+    padding: 8px;
+}
+
+.descanso-day-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.descanso-day-top strong {
+    color: #24364f;
+    font-size: 12px;
+}
+
+.descanso-day-count {
+    min-width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 800;
+    color: #0b4a78;
+    background: #d9ecff;
+    border: 1px solid #b9ddff;
+}
+
+.descanso-chip-cloud {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.descanso-chip {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 800;
+    color: #065f8f;
+    background: #e5f4ff;
+    border: 1px solid #bfe5ff;
+}
+
+.descanso-empty,
+.descanso-empty-mini {
+    color: var(--ink-700);
+    font-weight: 700;
+}
+
+.descanso-empty {
+    border: 1px dashed rgba(52, 131, 250, 0.28);
+    border-radius: 10px;
+    padding: 10px;
+    text-align: center;
 }
 
 .asistencia-row {
@@ -888,5 +1093,18 @@ button:hover {
 
     .asistencia-col.hora {
         display: none;
+    }
+
+    .asistencia-cards-grid {
+        grid-template-columns: 1fr;
+        padding: 8px;
+    }
+
+    .asistencia-person-stats {
+        grid-template-columns: 1fr;
+    }
+
+    .descanso-days-grid {
+        grid-template-columns: 1fr;
     }
 }

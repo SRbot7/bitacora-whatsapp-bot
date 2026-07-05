@@ -13,7 +13,7 @@ const EQUIPO_INGENIERIA = [
     {
         key: 'saul',
         nombre: 'Saul Romero Romero',
-        aliases: ['saul romero romero', 'saul romero', 'saul']
+        aliases: ['saul romero romero', 'saul romero', 'saul', 'ctamez2016b', '~ ctamez2016b']
     },
     {
         key: 'eliezer',
@@ -26,6 +26,7 @@ const EQUIPO_INGENIERIA = [
         aliases: ['flavio cruz santiago', 'flavio cruz', 'flavio']
     }
 ];
+const INGENIERIA_DESCANSO_DOMINGO_KEYS = new Set(['saul', 'eliezer', 'flavio']);
 
 function normalizarTexto(valor = '') {
     return valor
@@ -61,6 +62,7 @@ function resolverIngenieriaPersona(autor = '') {
 async function obtenerAsistenciaIngenieriaHoy() {
     const fechaHoyMxRes = await pool.query(`SELECT (NOW() AT TIME ZONE 'America/Mexico_City')::date AS fecha_hoy`);
     const fechaHoy = fechaHoyMxRes.rows[0]?.fecha_hoy;
+    const esDomingo = moment(fechaHoy).tz('America/Mexico_City').isoWeekday() === 7;
     const presentes = new Set();
 
     try {
@@ -86,39 +88,25 @@ async function obtenerAsistenciaIngenieriaHoy() {
         }
     }
 
-    try {
-        const legacyRes = await pool.query(
-            `
-            SELECT autor, total_reportes, total_evidencias
-            FROM asistencia_limpieza_diaria
-            WHERE fecha = $1
-              AND grupo ILIKE $2
-            `,
-            [fechaHoy, `%${GRUPO_ASISTENCIA_INGENIERIA}%`]
-        );
-
-        for (const row of legacyRes.rows) {
-            const tieneActividad = Number(row.total_reportes || 0) > 0 || Number(row.total_evidencias || 0) > 0;
-            if (!tieneActividad) {
-                continue;
-            }
-
-            const persona = resolverIngenieriaPersona(row.autor);
-            if (persona) {
-                presentes.add(persona.key);
-            }
-        }
-    } catch (error) {
-        if (!error || error.code !== '42P01') {
-            throw error;
-        }
-    }
-
     const presentesNombres = EQUIPO_INGENIERIA
-        .filter((persona) => presentes.has(persona.key))
+        .filter((persona) => {
+            const descansoDominical = esDomingo && INGENIERIA_DESCANSO_DOMINGO_KEYS.has((persona.key || '').toLowerCase());
+            if (descansoDominical) {
+                return false;
+            }
+
+            return presentes.has(persona.key);
+        })
         .map((persona) => persona.nombre);
     const faltantesNombres = EQUIPO_INGENIERIA
-        .filter((persona) => !presentes.has(persona.key))
+        .filter((persona) => {
+            const descansoDominical = esDomingo && INGENIERIA_DESCANSO_DOMINGO_KEYS.has((persona.key || '').toLowerCase());
+            if (descansoDominical) {
+                return false;
+            }
+
+            return !presentes.has(persona.key);
+        })
         .map((persona) => persona.nombre);
 
     return {
@@ -252,8 +240,6 @@ async function obtenerResumenOperativo({ inicioDia, finDia }) {
         limpiezaHoy,
         pendientesAbiertos,
         pendientesHoy,
-        materialesTotal,
-        materialesHoy,
         proyectosTotal,
         proyectosHoy,
         asistenciaGeneral
@@ -299,16 +285,6 @@ async function obtenerResumenOperativo({ inicioDia, finDia }) {
         `, [inicioDia, finDia]),
         contar(`
             SELECT COUNT(*)::int AS total
-            FROM materiales_solicitados
-        `),
-        contar(`
-            SELECT COUNT(*)::int AS total
-            FROM materiales_solicitados
-            WHERE fecha >= $1
-              AND fecha <= $2
-        `, [inicioDia, finDia]),
-        contar(`
-            SELECT COUNT(*)::int AS total
             FROM proyectos_mtto
         `),
         contar(`
@@ -327,8 +303,6 @@ async function obtenerResumenOperativo({ inicioDia, finDia }) {
         limpiezaHoy,
         pendientesAbiertos,
         pendientesHoy,
-        materialesTotal,
-        materialesHoy,
         proyectosTotal,
         proyectosHoy,
         asistenciaGeneral
@@ -353,7 +327,6 @@ function construirMensajeResumenOperativo({ momento, resumen, tipo }) {
         'SUPERVISOR',
         `- Pendientes abiertos: ${resumen.pendientesAbiertos}`,
         `- Pendientes creados hoy: ${resumen.pendientesHoy}`,
-        `- Materiales hoy / total: ${resumen.materialesHoy} / ${resumen.materialesTotal}`,
         `- Proyectos hoy / total: ${resumen.proyectosHoy} / ${resumen.proyectosTotal}`,
         '',
         'ASISTENCIA GENERAL',

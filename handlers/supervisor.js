@@ -11,11 +11,9 @@ const {
     listarPreventivosPendientes,
     listarCompletadosSupervisor,
     listarPreventivosCompletados,
-    listarRiesgos,
-    listarMaterialesSupervisor
+    listarRiesgos
 } = require('../services/pendientes');
 
-const { registrarMaterial }  = require('../services/materiales');
 const { registrarProyecto }  = require('../services/proyectos');
 const {
     obtenerResumenOperativo,
@@ -23,14 +21,12 @@ const {
 } = require('../services/reportes');
 const {
     guardarEvidenciaPendiente,
-    guardarEvidenciaMaterial,
     guardarEvidenciaProyecto
 } = require('../services/evidencias');
 
 const { guardarEvidencia } = require('../lib/bitacora-storage');
 const {
     ultimosPendientes,
-    ultimosMateriales,
     ultimosProyectos,
     flujosSupervisor,
     claveMemoria
@@ -55,11 +51,17 @@ const {
     validarLimitesPermisoMes,
     validarCoberturaTurno,
     registrarPermisoConAprobacion,
+    confirmarTipoPermiso,
     aprobarPermiso,
     reportePermisosDelMes,
     reportePermisosPersona,
     listarDeudasPendientes
 } = require('../services/permisos-workflow');
+const {
+    registrarEventoCO,
+    listarHistorialCO,
+    rangoHoyMx
+} = require('../services/historial-co');
 const {
     menuPrincipal,
     menuAyuda,
@@ -71,7 +73,6 @@ const {
     menuAlertas,
     menuConfigurar,
     detalleAyudaPendientes,
-    detalleAyudaMateriales,
     detalleAyudaProyectos,
     detalleAyudaEvidencias,
     detalleAyudaPermisos,
@@ -89,8 +90,8 @@ const {
 // =========================
 
 const COMANDOS = [
-    'AYUDA', 'AYUDA PENDIENTES', 'AYUDA MATERIALES',
-    'AYUDA INSUMOS', 'AYUDA PROYECTOS', 'AYUDA EVIDENCIAS',
+    'AYUDA', 'AYUDA PENDIENTES',
+    'AYUDA PROYECTOS', 'AYUDA EVIDENCIAS',
     'AYUDA PREVENTIVOS', 'AYUDA ALERTAS', 'AYUDA HISTORICO',
     'AYUDA CENTRO', 'AYUDA CENTRO OPERATIVO', 'AYUDA PERMISOS',
     'AYUDA GUIADA', 'GUIA AYUDA', 'AYUDA RAPIDA',
@@ -101,7 +102,7 @@ const COMANDOS = [
     'ALERTAS', 'ALERTAS ASISTENCIA',
     'ASISTENCIA', 'ASISTENCIA HOY', 'EN TURNO', 'EN SITIO',
     'RESUMEN ASISTENCIA', 'MARCADOR', 'MARCADOR ASISTENCIA',
-    'RIESGOS', 'MATERIALES', 'PROYECTOS'
+    'RIESGOS', 'PROYECTOS'
 ];
 
 const GRUPO_ASISTENCIA_INGENIERIA = 'Asistencia SHP1 Pachuca';
@@ -113,7 +114,7 @@ const EQUIPO_INGENIERIA = [
         puesto: 'Electromecanico',
         turno: '1er turno',
         horario: '07:00-15:00',
-        aliases: ['saul romero romero', 'saul romero', 'saul']
+        aliases: ['saul romero romero', 'saul romero', 'saul', 'ctamez2016b', '~ ctamez2016b']
     },
     {
         key: 'eliezer',
@@ -128,23 +129,16 @@ const EQUIPO_INGENIERIA = [
         nombre: 'Flavio Cruz Santiago',
         puesto: 'Multitecnico',
         turno: '3er turno',
-        horario: '22:00-06:00',
+        horario: '23:00-06:00',
         aliases: ['flavio cruz santiago', 'flavio cruz', 'flavio']
     }
 ];
+const INGENIERIA_DESCANSO_DOMINGO_KEYS = new Set(['saul', 'eliezer', 'flavio']);
 
 const COMANDOS_GUIA_PENDIENTE = [
     'GUIA PENDIENTE',
     'NUEVO PENDIENTE',
     'INICIAR PENDIENTE'
-];
-
-const COMANDOS_GUIA_MATERIAL = [
-    'GUIA MATERIAL',
-    'GUIA INSUMO',
-    'NUEVO MATERIAL',
-    'NUEVO INSUMO',
-    'INICIAR MATERIAL'
 ];
 
 const COMANDOS_GUIA_PROYECTO = [
@@ -312,21 +306,6 @@ function iniciarFlujoPendiente(clave) {
     };
 }
 
-function iniciarFlujoMaterial(clave) {
-    flujosSupervisor[clave] = {
-        tipo: 'MATERIAL',
-        paso: 0,
-        data: {
-            material: '',
-            cantidad: null,
-            unidad: '',
-            prioridad: 'MEDIA',
-            area: '',
-            justificacion: ''
-        }
-    };
-}
-
 function iniciarFlujoProyecto(clave, nombreAutor) {
     flujosSupervisor[clave] = {
         tipo: 'PROYECTO',
@@ -397,15 +376,7 @@ function resolverAyudaGuiada(respuesta = '') {
         ].join('\n');
     }
 
-    if (r === '2' || r === 'MATERIAL' || r === 'MATERIALES' || r === 'INSUMO' || r === 'INSUMOS') {
-        return [
-            '📦 Materiales/Insumos',
-            'Usa GUIA MATERIAL o GUIA INSUMO.',
-            'Al finalizar, envía fotos y se ligan al último material.'
-        ].join('\n');
-    }
-
-    if (r === '3' || r === 'PROYECTO' || r === 'PROYECTOS') {
+    if (r === '2' || r === 'PROYECTO' || r === 'PROYECTOS') {
         return [
             '🏗️ Proyectos',
             'Usa GUIA PROYECTO para captura guiada.',
@@ -413,24 +384,24 @@ function resolverAyudaGuiada(respuesta = '') {
         ].join('\n');
     }
 
-    if (r === '4' || r === 'EVIDENCIA' || r === 'EVIDENCIAS' || r === 'FOTO' || r === 'FOTOS') {
+    if (r === '3' || r === 'EVIDENCIA' || r === 'EVIDENCIAS' || r === 'FOTO' || r === 'FOTOS') {
         return [
             '📸 Evidencias',
             'Envía una o varias imágenes después de registrar.',
-            'El sistema las liga al último registro tuyo (pendiente/material/proyecto).'
+            'El sistema las liga al último registro tuyo (pendiente/proyecto).'
         ].join('\n');
     }
 
-    if (r === '5' || r === 'CONSULTA' || r === 'CONSULTAS') {
+    if (r === '4' || r === 'CONSULTA' || r === 'CONSULTAS') {
         return [
             '📋 Consultas útiles',
             'LISTAR, ABIERTOS, CERRADOS, COMPLETADOS',
-            'MATERIALES, PROYECTOS, RIESGOS',
+            'PROYECTOS, RIESGOS',
             'PREVENTIVOS, PREVENTIVOS CERRADOS'
         ].join('\n');
     }
 
-    return 'No entendí la opción. Responde 1, 2, 3, 4 o 5.';
+    return 'No entendí la opción. Responde 1, 2, 3 o 4.';
 }
 
 function siguientePreguntaPendiente(paso) {
@@ -442,19 +413,6 @@ function siguientePreguntaPendiente(paso) {
         '5/7 Turno:',
         '6/7 Tecnicos (ejemplo: Juan|Pedro):',
         '7/7 Fecha programada DD/MM/AAAA (o escribe OMITIR). Al finalizar puedes enviar fotos de evidencia:'
-    ];
-
-    return preguntas[paso] || '';
-}
-
-function siguientePreguntaMaterial(paso) {
-    const preguntas = [
-        '1/6 Material o insumo requerido:',
-        '2/6 Cantidad (numero, o escribe OMITIR):',
-        '3/6 Unidad (PZA, M, KG, L, etc.):',
-        '4/6 Prioridad (ALTA/MEDIA/BAJA):',
-        '5/6 Area:',
-        '6/6 Justificacion. Al finalizar puedes enviar fotos de evidencia:'
     ];
 
     return preguntas[paso] || '';
@@ -513,6 +471,7 @@ function resolverIngenieriaPersona(autor = '') {
 async function obtenerAsistenciaIngenieriaHoy() {
     const fechaHoyMxRes = await pool.query(`SELECT (NOW() AT TIME ZONE 'America/Mexico_City')::date AS fecha_hoy`);
     const fechaHoy = fechaHoyMxRes.rows[0]?.fecha_hoy;
+    const esDomingo = moment(fechaHoy).tz('America/Mexico_City').isoWeekday() === 7;
     const mapa = new Map();
 
     const acumular = (row) => {
@@ -555,8 +514,8 @@ async function obtenerAsistenciaIngenieriaHoy() {
                 autor,
                 COUNT(*)::int AS total_reportes,
                 0::int AS total_evidencias,
-                MIN(created_at) AS primer_reporte,
-                MAX(created_at) AS ultimo_reporte
+                MIN(COALESCE(evento_at, ((created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City'))) AS primer_reporte,
+                MAX(COALESCE(evento_at, ((created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City'))) AS ultimo_reporte
             FROM asistencia_mantenimiento_eventos
             WHERE fecha = $1
               AND grupo ILIKE $2
@@ -575,24 +534,30 @@ async function obtenerAsistenciaIngenieriaHoy() {
         }
     }
 
-    const legacyRes = await pool.query(
-        `
-        SELECT
-            autor,
-            total_reportes,
-            total_evidencias,
-            primer_reporte,
-            ultimo_reporte
-        FROM asistencia_limpieza_diaria
-        WHERE fecha = $1
-          AND grupo ILIKE $2
-        ORDER BY autor ASC
-        `,
-        [fechaHoy, `%${GRUPO_ASISTENCIA_INGENIERIA}%`]
-    );
-
-    for (const row of legacyRes.rows) {
-        acumular(row);
+    // Validar ajustes en asistencia_limpieza_ajustes (sobreride para LABORA/PERMISO)
+    try {
+        const ajustesRes = await pool.query(
+            `SELECT persona_key, tipo FROM asistencia_limpieza_ajustes WHERE fecha = $1`,
+            [fechaHoy]
+        );
+        for (const ajuste of ajustesRes.rows) {
+            const personaKey = ajuste.persona_key?.toLowerCase();
+            const persona = EQUIPO_INGENIERIA.find(p => p.key?.toLowerCase() === personaKey);
+            if (persona && ajuste.tipo === 'LABORA') {
+                // Si hay registro LABORA, marca como asistencia
+                if (!mapa.has(persona.key)) {
+                    mapa.set(persona.key, {
+                        totalReportes: 1,
+                        totalEvidencias: 0,
+                        primerReporte: new Date().toISOString(),
+                        ultimoReporte: new Date().toISOString(),
+                        autores: []
+                    });
+                }
+            }
+        }
+    } catch (error) {
+        // Tabla no existe aún, continuar sin validar
     }
 
     return EQUIPO_INGENIERIA.map((persona) => {
@@ -604,11 +569,16 @@ async function obtenerAsistenciaIngenieriaHoy() {
             autores: []
         };
 
+        const descansoDominical = esDomingo && INGENIERIA_DESCANSO_DOMINGO_KEYS.has((persona.key || '').toLowerCase());
+        const estado = descansoDominical
+            ? 'D'
+            : (agg.totalReportes > 0 || agg.totalEvidencias > 0 ? 'A' : 'F');
+
         return {
             persona: persona.nombre,
             puesto: persona.puesto,
             turno: persona.turno,
-            estado: agg.totalReportes > 0 || agg.totalEvidencias > 0 ? 'A' : 'F',
+            estado,
             totalReportes: agg.totalReportes,
             totalEvidencias: agg.totalEvidencias,
             primerReporte: agg.primerReporte,
@@ -665,57 +635,6 @@ function procesarPasoPendiente({ flujo, respuesta }) {
         }
 
         flujo.data.fechaSql = fechaSql;
-        return { ok: true, finalizado: true, data: flujo.data };
-    }
-
-    flujo.paso += 1;
-    return { ok: true, finalizado: false };
-}
-
-function procesarPasoMaterial({ flujo, respuesta }) {
-    const valor = (respuesta || '').trim();
-
-    if (flujo.paso === 0) {
-        if (!valor) {
-            return { ok: false, msg: 'El material/insumo no puede ir vacio.' };
-        }
-        flujo.data.material = valor;
-    }
-
-    if (flujo.paso === 1) {
-        if (!valor || /^OMITIR$/i.test(valor)) {
-            flujo.data.cantidad = null;
-        } else if (!/^\d+(\.\d+)?$/.test(valor)) {
-            return { ok: false, msg: 'Cantidad invalida. Escribe numero o OMITIR.' };
-        } else {
-            flujo.data.cantidad = Number(valor);
-        }
-    }
-
-    if (flujo.paso === 2) {
-        flujo.data.unidad = /^OMITIR$/i.test(valor) ? '' : valor;
-    }
-
-    if (flujo.paso === 3) {
-        const prioridad = valor.toUpperCase();
-        if (!['ALTA', 'MEDIA', 'BAJA'].includes(prioridad)) {
-            return { ok: false, msg: 'Prioridad invalida. Usa ALTA, MEDIA o BAJA.' };
-        }
-        flujo.data.prioridad = prioridad;
-    }
-
-    if (flujo.paso === 4) {
-        if (!valor) {
-            return { ok: false, msg: 'El area no puede ir vacia.' };
-        }
-        flujo.data.area = valor;
-    }
-
-    if (flujo.paso === 5) {
-        if (!valor) {
-            return { ok: false, msg: 'La justificacion no puede ir vacia.' };
-        }
-        flujo.data.justificacion = valor;
         return { ok: true, finalizado: true, data: flujo.data };
     }
 
@@ -911,6 +830,30 @@ function resolverPersonaAsistencia(area = '', valor = '') {
     return encontrada || '';
 }
 
+function opcionesPersonalPermiso(area = '') {
+    if (area === 'LIMPIEZA') {
+        return MARCADOR_PERSONAL.map((p) => ({ nombre: p.nombre, key: p.key, turno: p.turno || '' }));
+    }
+
+    return EQUIPO_INGENIERIA.map((p) => ({
+        nombre: p.nombre,
+        key: p.key,
+        turno: `${p.turno || ''} ${p.horario || ''}`.trim()
+    }));
+}
+
+function resolverPersonaPermisoPorArea(area = '', valor = '') {
+    const opciones = opcionesPersonalPermiso(area);
+    const n = normalizarComando(valor);
+    const idx = Number.parseInt(n, 10);
+
+    if (Number.isInteger(idx) && idx >= 1 && idx <= opciones.length) {
+        return opciones[idx - 1] || null;
+    }
+
+    return opciones.find((p) => normalizarComando(p.nombre) === n) || null;
+}
+
 function parsearAsistenciaMantenimientoManual(cuerpo = '', nombreAutor = '') {
     const partes = (cuerpo || '')
         .split('|')
@@ -960,6 +903,101 @@ function parsearAsistenciaMantenimientoManual(cuerpo = '', nombreAutor = '') {
         turno,
         ubicacion
     };
+}
+
+function resolverPersonaPermiso(valor = '') {
+    const n = normalizarComando(valor).toLowerCase();
+    if (!n) {
+        return null;
+    }
+
+    for (const p of MARCADOR_PERSONAL) {
+        const nombreN = normalizarComando(p.nombre).toLowerCase();
+        if (n.includes(nombreN) || nombreN.includes(n)) {
+            return { key: p.key, nombre: p.nombre, area: 'LIMPIEZA', turno: p.turno || '' };
+        }
+
+        if ((p.aliases || []).some((a) => {
+            const aliasN = normalizarComando(a).toLowerCase();
+            return aliasN && (n.includes(aliasN) || aliasN.includes(n));
+        })) {
+            return { key: p.key, nombre: p.nombre, area: 'LIMPIEZA', turno: p.turno || '' };
+        }
+    }
+
+    for (const p of EQUIPO_INGENIERIA) {
+        const nombreN = normalizarComando(p.nombre).toLowerCase();
+        if (n.includes(nombreN) || nombreN.includes(n)) {
+            return { key: p.key, nombre: p.nombre, area: 'MTTO', turno: `${p.turno || ''} ${p.horario || ''}`.trim() };
+        }
+
+        if ((p.aliases || []).some((a) => {
+            const aliasN = normalizarComando(a).toLowerCase();
+            return aliasN && (n.includes(aliasN) || aliasN.includes(n));
+        })) {
+            return { key: p.key, nombre: p.nombre, area: 'MTTO', turno: `${p.turno || ''} ${p.horario || ''}`.trim() };
+        }
+    }
+
+    return null;
+}
+
+function normalizarTipoPermisoInput(valor = '') {
+    const v = normalizarComando(valor || 'CAMBIO DESCANSO');
+    if (!v) return 'CAMBIO_DESCANSO';
+    if (v === '1' || v.includes('DESCUENTO')) return 'DESCUENTO_SUELDO';
+    if (v === '2' || (v.includes('CAMBIO') && v.includes('DESCANSO'))) return 'CAMBIO_DESCANSO';
+    if (v === '3' || (v.includes('TURNO') && v.includes('DOBLE'))) return 'TURNO_DOBLE';
+    if (v === '4' || v.includes('INTERCAMBIO')) return 'INTERCAMBIO_TURNO';
+    if (v === '5' || v.includes('PENDIENTE')) return 'PENDIENTE_DEFINIR';
+    return v.replace(/\s+/g, '_');
+}
+
+function parseFechaPermiso(valor = '', fechaBase = moment().tz('America/Mexico_City')) {
+    const t = String(valor || '').trim();
+    const tn = normalizarComando(t).toLowerCase();
+    if (!t) {
+        return fechaBase.clone();
+    }
+
+    if (tn === 'hoy') {
+        return fechaBase.clone();
+    }
+
+    if (tn === 'manana' || tn === 'mañana') {
+        return fechaBase.clone().add(1, 'day');
+    }
+
+    const fechaTexto = t.match(/(\d{2}\/\d{2}\/\d{4}|\d{2}\/\d{2}\/\d{2}|\d{2}\/\d{2}|\d{4}-\d{2}-\d{2})/);
+    const fechaValor = fechaTexto?.[1] || t;
+
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(fechaValor)) {
+        const d = moment.tz(fechaValor, 'DD/MM/YYYY', true, 'America/Mexico_City');
+        return d.isValid() ? d : null;
+    }
+
+    if (/^\d{2}\/\d{2}\/\d{2}$/.test(fechaValor)) {
+        const d = moment.tz(fechaValor, 'DD/MM/YY', true, 'America/Mexico_City');
+        return d.isValid() ? d : null;
+    }
+
+    if (/^\d{2}\/\d{2}$/.test(fechaValor)) {
+        const [dd, mm] = fechaValor.split('/').map((x) => Number.parseInt(x, 10));
+        const year = fechaBase.year();
+        const d = moment.tz(`${year}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`, 'YYYY-MM-DD', 'America/Mexico_City');
+        return d.isValid() ? d : null;
+    }
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(fechaValor)) {
+        const d = moment.tz(fechaValor, 'YYYY-MM-DD', true, 'America/Mexico_City');
+        return d.isValid() ? d : null;
+    }
+
+    return null;
+}
+
+function requiereFechaCompensacion(tipoPermiso = '') {
+    return ['CAMBIO_DESCANSO', 'TURNO_DOBLE'].includes(String(tipoPermiso || '').toUpperCase());
 }
 
 
@@ -1014,12 +1052,11 @@ async function procesarMenuAnidado({ flujo, respuesta, mensaje, clave }) {
     // MENU_AYUDA
     if (flujo.tipo === 'MENU_AYUDA') {
         if (valor === '1') return { siguiente: null, msg: detalleAyudaPendientes() };
-        if (valor === '2') return { siguiente: null, msg: detalleAyudaMateriales() };
-        if (valor === '3') return { siguiente: null, msg: detalleAyudaProyectos() };
-        if (valor === '4') return { siguiente: null, msg: detalleAyudaEvidencias() };
-        if (valor === '5') return { siguiente: null, msg: detalleAyudaPermisos() };
-        if (valor === '6') return { siguiente: null, msg: detalleAyudaAsistencia() };
-        return { siguiente: null, msg: '⚠️ Opción no válida. Responde 1-6 o 0 para atrás.' };
+        if (valor === '2') return { siguiente: null, msg: detalleAyudaProyectos() };
+        if (valor === '3') return { siguiente: null, msg: detalleAyudaEvidencias() };
+        if (valor === '4') return { siguiente: null, msg: detalleAyudaPermisos() };
+        if (valor === '5') return { siguiente: null, msg: detalleAyudaAsistencia() };
+        return { siguiente: null, msg: '⚠️ Opción no válida. Responde 1-5 o 0 para atrás.' };
     }
 
     // MENU_GUIA
@@ -1029,18 +1066,14 @@ async function procesarMenuAnidado({ flujo, respuesta, mensaje, clave }) {
             return { siguiente: 'GUIA_PENDIENTE', msg: 'Iniciando PENDIENTE...\nEscribe la descripción:' };
         }
         if (valor === '2') {
-            flujosSupervisor[clave] = { tipo: 'MATERIAL', paso: 0, data: { material: '' } };
-            return { siguiente: 'GUIA_MATERIAL', msg: 'Iniciando MATERIAL...\nEscribe el material:' };
-        }
-        if (valor === '3') {
             flujosSupervisor[clave] = { tipo: 'PROYECTO', paso: 0, data: { nombre: '' } };
             return { siguiente: 'GUIA_PROYECTO', msg: 'Iniciando PROYECTO...\nEscribe el nombre:' };
         }
-        if (valor === '4') {
+        if (valor === '3') {
             flujosSupervisor[clave] = { tipo: 'PERMISO_GUIADO', paso: 0, data: {} };
             return { siguiente: 'GUIA_PERMISO', msg: guiaPermisoMenuEquipos() };
         }
-        return { siguiente: null, msg: '⚠️ Opción no válida. Responde 1-4 o 0 para atrás.' };
+        return { siguiente: null, msg: '⚠️ Opción no válida. Responde 1-3 o 0 para atrás.' };
     }
 
     // MENU_INFORMES
@@ -1054,19 +1087,16 @@ async function procesarMenuAnidado({ flujo, respuesta, mensaje, clave }) {
             return { siguiente: 'MENU_PREVENTIVOS', msg: menuPreventivos() };
         }
         if (valor === '3') {
-            return { comando: 'MATERIALES' };
-        }
-        if (valor === '4') {
             flujosSupervisor[clave] = { tipo: 'MENU_ASISTENCIA', paso: 0, data: {} };
             return { siguiente: 'MENU_ASISTENCIA', msg: menuAsistencia() };
         }
-        if (valor === '5') {
+        if (valor === '4') {
             return { comando: 'PERMISOS RESUMEN' };
         }
-        if (valor === '6') {
+        if (valor === '5') {
             return { comando: 'REPORTE' };
         }
-        return { siguiente: null, msg: '⚠️ Opción no válida. Responde 1-6 o 0 para atrás.' };
+        return { siguiente: null, msg: '⚠️ Opción no válida. Responde 1-5 o 0 para atrás.' };
     }
 
     // MENU_PENDIENTES
@@ -1143,7 +1173,7 @@ async function procesarMenuAnidado({ flujo, respuesta, mensaje, clave }) {
     // MENU_CONFIGURAR
     if (flujo.tipo === 'MENU_CONFIGURAR') {
         if (valor === '1') {
-            return { siguiente: null, msg: '✅ Para aprobar un permiso:\n\nAPROBAR PERMISO <ID>\n\nEj: APROBAR PERMISO 15' };
+            return { siguiente: null, msg: '✅ Flujo recomendado:\n\n1) CONFIRMAR PERMISO <ID> | DESCUENTO/CAMBIO DESCANSO/TURNO DOBLE/INTERCAMBIO\n   (si aplica, te pedirá día de compensación)\n2) APROBAR PERMISO <ID>\n\nTambién puedes aprobar directo con tipo+fecha:\nAPROBAR PERMISO <ID> | CAMBIO DESCANSO | 12/07/2026' };
         }
         if (valor === '2') {
             return { siguiente: null, msg: '🗑️ Para cancelar un ajuste:\n\nCANCELAR AJUSTE <ID>\n\nEj: CANCELAR AJUSTE 8' };
@@ -1163,6 +1193,24 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
     const desc        = normalizarComando(descripcion);
     const clave       = claveMemoria(chat.name, message.author);
     const flujoActivo = flujosSupervisor[clave];
+
+    async function auditarCO({ comando, payload = null, estado = 'OK', resultado = '', referenciaTabla = '', referenciaId = null, error = '' }) {
+        try {
+            await registrarEventoCO(pool, {
+                chatGrupo: chat?.name || '',
+                autor: nombreAutor || 'Sin nombre',
+                comando,
+                payload,
+                estado,
+                resultado,
+                referenciaTabla,
+                referenciaId,
+                error
+            });
+        } catch (auditError) {
+            console.error('⚠️ Error auditando CO:', auditError?.message || auditError);
+        }
+    }
 
     // =========================
     // COMANDOS DE ALTA PRIORIDAD (antes de flujos)
@@ -1281,6 +1329,374 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
             console.error('❌ Error registrando permiso:', error);
             await message.reply(`❌ Error: ${error.message}`);
         }
+        return;
+    }
+
+    // PERMISO: Persona | Motivo | Tipo(opcional) | Fecha(opcional)
+    const permisoMatch = descripcion.match(/^PERMISO\s*:\s*(.+?)\s*\|\s*(.+?)(?:\s*\|\s*(.+?))?(?:\s*\|\s*(.+))?$/i);
+    if (permisoMatch) {
+        const personaRaw = permisoMatch[1]?.trim();
+        const motivo = permisoMatch[2]?.trim();
+        const tipoPermiso = normalizarTipoPermisoInput(permisoMatch[3] || 'CAMBIO DESCANSO');
+        const fechaPermiso = parseFechaPermiso(permisoMatch[4], fecha);
+
+        if (!personaRaw || !motivo) {
+            await auditarCO({
+                comando: 'PERMISO',
+                payload: { descripcion },
+                estado: 'ERROR',
+                error: 'Formato inválido'
+            });
+            await message.reply('⚠️ Formato inválido. Usa: PERMISO: Nombre | Motivo | Tipo | Fecha');
+            return;
+        }
+
+        if (!fechaPermiso) {
+            await auditarCO({
+                comando: 'PERMISO',
+                payload: { personaRaw, motivo, tipoPermiso, fechaRaw: permisoMatch[4] || '' },
+                estado: 'ERROR',
+                error: 'Fecha inválida'
+            });
+            await message.reply('⚠️ Fecha inválida. Usa DD/MM, DD/MM/YYYY o YYYY-MM-DD.');
+            return;
+        }
+
+        const persona = resolverPersonaPermiso(personaRaw);
+        if (!persona) {
+            await auditarCO({
+                comando: 'PERMISO',
+                payload: { personaRaw, motivo, tipoPermiso, fecha: fechaPermiso.format('YYYY-MM-DD') },
+                estado: 'ERROR',
+                error: 'Persona no encontrada'
+            });
+            await message.reply(`⚠️ Persona no encontrada: "${personaRaw}".`);
+            return;
+        }
+
+        const limites = await validarLimitesPermisoMes(pool, persona.key, tipoPermiso, fechaPermiso);
+        if (!limites.ok) {
+            await auditarCO({
+                comando: 'PERMISO',
+                payload: { personaKey: persona.key, tipoPermiso, fecha: fechaPermiso.format('YYYY-MM-DD') },
+                estado: 'ERROR',
+                error: limites.alerta || 'Límite mensual alcanzado'
+            });
+            await message.reply(limites.alerta || '⚠️ Límite mensual alcanzado para este tipo de permiso.');
+            return;
+        }
+
+        const cobertura = await validarCoberturaTurno(pool, persona.key, fechaPermiso, MARCADOR_PERSONAL, EQUIPO_INGENIERIA);
+        if (!cobertura.ok && cobertura.critico) {
+            await auditarCO({
+                comando: 'PERMISO',
+                payload: { personaKey: persona.key, tipoPermiso, fecha: fechaPermiso.format('YYYY-MM-DD') },
+                estado: 'ERROR',
+                error: cobertura.msg || 'Sin cobertura crítica'
+            });
+            await message.reply(cobertura.msg || '⚠️ No hay cobertura para aprobar este permiso.');
+            return;
+        }
+
+        const guardado = await registrarPermisoConAprobacion(pool, {
+            fecha: fechaPermiso,
+            personaKey: persona.key,
+            area: persona.area,
+            tipoPermiso,
+            motivo,
+            creadoPor: nombreAutor
+        });
+
+        if (!guardado.ok) {
+            await auditarCO({
+                comando: 'PERMISO',
+                payload: { personaKey: persona.key, tipoPermiso, fecha: fechaPermiso.format('YYYY-MM-DD') },
+                estado: 'ERROR',
+                error: guardado.error || 'No se pudo registrar permiso'
+            });
+            await message.reply(`❌ No se pudo registrar permiso: ${guardado.error || 'Error desconocido'}`);
+            return;
+        }
+
+        await auditarCO({
+            comando: 'PERMISO',
+            payload: {
+                personaKey: persona.key,
+                tipoPermiso,
+                fecha: fechaPermiso.format('YYYY-MM-DD'),
+                motivo
+            },
+            estado: 'OK',
+            resultado: 'Permiso registrado en estado pendiente',
+            referenciaTabla: 'asistencia_limpieza_ajustes',
+            referenciaId: guardado.id
+        });
+
+        const coberturaMsg = (cobertura.alternos || []).length
+            ? `\nCobertura sugerida: ${(cobertura.alternos || []).join(', ')}`
+            : '';
+
+        await message.reply(
+            `📋 Permiso registrado (pendiente de aprobación)\n` +
+            `ID: ${guardado.id}\n` +
+            `Persona: ${persona.nombre}\n` +
+            `Fecha: ${fechaPermiso.format('DD/MM/YYYY')}\n` +
+            `Tipo: ${tipoPermiso.replace(/_/g, ' ')}\n` +
+            `Motivo: ${motivo}${coberturaMsg}\n\n` +
+            `Para aprobar: APROBAR PERMISO ${guardado.id}`
+        );
+        return;
+    }
+
+    const confirmarTipoPermisoMatch = descripcion.match(/^CONFIRMAR\s+PERMISO\s+(\d+)\s*\|\s*([^|]+?)(?:\s*\|\s*(.+))?$/i);
+    if (confirmarTipoPermisoMatch) {
+        const id = Number.parseInt(confirmarTipoPermisoMatch[1], 10);
+        const tipoPermiso = normalizarTipoPermisoInput(confirmarTipoPermisoMatch[2] || '');
+        const fechaCompRaw = (confirmarTipoPermisoMatch[3] || '').trim();
+
+        if (requiereFechaCompensacion(tipoPermiso) && !fechaCompRaw) {
+            flujosSupervisor[clave] = {
+                tipo: 'CONFIRMAR_PERMISO_DETALLE',
+                paso: 0,
+                data: { id, tipoPermiso }
+            };
+
+            await message.reply(
+                `📅 Falta el día de compensación para ${(tipoPermiso || '').replace(/_/g, ' ')}\n` +
+                `Responde con la fecha (DD/MM o DD/MM/YYYY).\n` +
+                `Ejemplo: 12/07/2026\n` +
+                `Escribe CANCELAR para salir.`
+            );
+            return;
+        }
+
+        const fechaComp = fechaCompRaw ? parseFechaPermiso(fechaCompRaw, fecha) : null;
+        if (fechaCompRaw && !fechaComp) {
+            await auditarCO({
+                comando: 'CONFIRMAR PERMISO',
+                payload: { id, tipoPermiso, fechaCompRaw },
+                estado: 'ERROR',
+                error: 'Fecha inválida'
+            });
+            await message.reply('⚠️ Fecha inválida. Usa DD/MM, DD/MM/YYYY o YYYY-MM-DD.');
+            return;
+        }
+
+        const confirmacion = await confirmarTipoPermiso(pool, id, tipoPermiso, nombreAutor, {
+            fechaPago: fechaComp ? fechaComp.format('YYYY-MM-DD') : ''
+        });
+        if (!confirmacion.ok) {
+            await auditarCO({
+                comando: 'CONFIRMAR PERMISO',
+                payload: { id, tipoPermiso, fechaPago: fechaComp ? fechaComp.format('YYYY-MM-DD') : '' },
+                estado: 'ERROR',
+                error: confirmacion.error || 'No se pudo confirmar tipo'
+            });
+            await message.reply(`⚠️ No se pudo confirmar tipo en permiso ${id}: ${confirmacion.error || 'sin detalle'}`);
+            return;
+        }
+
+        await auditarCO({
+            comando: 'CONFIRMAR PERMISO',
+            payload: {
+                id,
+                tipoPermiso,
+                fechaPago: confirmacion.permiso?.fecha_pago || null
+            },
+            estado: 'OK',
+            resultado: 'Tipo de permiso confirmado',
+            referenciaTabla: 'asistencia_limpieza_ajustes',
+            referenciaId: confirmacion.permiso?.id || id
+        });
+
+        await message.reply(
+            `🧾 Tipo confirmado\n` +
+            `ID: ${confirmacion.permiso?.id}\n` +
+            `Tipo: ${(confirmacion.permiso?.tipo_permiso || '').replace(/_/g, ' ')}\n` +
+            `Descansa: ${moment(confirmacion.permiso?.fecha).format('DD/MM/YYYY')}\n` +
+            `${confirmacion.permiso?.fecha_pago ? `Compensa/Paga: ${moment(confirmacion.permiso.fecha_pago).format('DD/MM/YYYY')}\n` : ''}` +
+            `Estado: ${confirmacion.permiso?.estado || 'PENDIENTE_APROBACION'}\n\n` +
+            `Siguiente paso: APROBAR PERMISO ${confirmacion.permiso?.id}`
+        );
+        return;
+    }
+
+    const aprobarPermisoMatch = descripcion.match(/^APROBAR\s+PERMISO\s+(\d+)(?:\s*\|\s*([^|]+?))?(?:\s*\|\s*(.+))?$/i);
+    if (aprobarPermisoMatch) {
+        const id = Number.parseInt(aprobarPermisoMatch[1], 10);
+        const tipoOverrideRaw = (aprobarPermisoMatch[2] || '').trim();
+        const fechaCompRaw = (aprobarPermisoMatch[3] || '').trim();
+        const tipoPermiso = tipoOverrideRaw ? normalizarTipoPermisoInput(tipoOverrideRaw) : '';
+        const fechaComp = fechaCompRaw ? parseFechaPermiso(fechaCompRaw, fecha) : null;
+        if (fechaCompRaw && !fechaComp) {
+            await auditarCO({
+                comando: 'APROBAR PERMISO',
+                payload: { id, tipoPermiso, fechaCompRaw },
+                estado: 'ERROR',
+                error: 'Fecha inválida'
+            });
+            await message.reply('⚠️ Fecha inválida. Usa DD/MM, DD/MM/YYYY o YYYY-MM-DD.');
+            return;
+        }
+
+        const aprobacion = await aprobarPermiso(pool, id, nombreAutor, {
+            tipoPermiso,
+            fechaPago: fechaComp ? fechaComp.format('YYYY-MM-DD') : ''
+        });
+        if (!aprobacion.ok) {
+            await auditarCO({
+                comando: 'APROBAR PERMISO',
+                payload: { id, tipoPermiso, fechaPago: fechaComp ? fechaComp.format('YYYY-MM-DD') : '' },
+                estado: 'ERROR',
+                error: aprobacion.error || 'No se pudo aprobar'
+            });
+            await message.reply(`⚠️ No se pudo aprobar permiso ${id}: ${aprobacion.error || 'No encontrado'}`);
+            return;
+        }
+
+        await auditarCO({
+            comando: 'APROBAR PERMISO',
+            payload: {
+                id,
+                tipoPermiso: aprobacion.permiso?.tipo_permiso || tipoPermiso || null,
+                fechaPago: aprobacion.permiso?.fecha_pago || null
+            },
+            estado: 'OK',
+            resultado: 'Permiso aprobado',
+            referenciaTabla: 'asistencia_limpieza_ajustes',
+            referenciaId: aprobacion.permiso?.id || id
+        });
+
+        await message.reply(
+            `✅ Permiso aprobado\n` +
+            `ID: ${aprobacion.permiso?.id}\n` +
+            `Persona key: ${aprobacion.permiso?.persona_key || '-'}\n` +
+            `Descansa: ${moment(aprobacion.permiso?.fecha).format('DD/MM/YYYY')}\n` +
+            `${aprobacion.permiso?.fecha_pago ? `Compensa/Paga: ${moment(aprobacion.permiso.fecha_pago).format('DD/MM/YYYY')}\n` : ''}` +
+            `Tipo: ${(aprobacion.permiso?.tipo_permiso || '').replace(/_/g, ' ')}`
+        );
+        return;
+    }
+
+    const cancelarAjusteMatch = descripcion.match(/^CANCELAR\s+AJUSTE\s+(\d+)$/i);
+    if (cancelarAjusteMatch) {
+        const id = Number.parseInt(cancelarAjusteMatch[1], 10);
+        const del = await pool.query('DELETE FROM asistencia_limpieza_ajustes WHERE id = $1 RETURNING id', [id]);
+        if (!del.rows.length) {
+            await auditarCO({
+                comando: 'CANCELAR AJUSTE',
+                payload: { id },
+                estado: 'ERROR',
+                error: 'Ajuste no encontrado'
+            });
+            await message.reply(`⚠️ Ajuste ${id} no encontrado.`);
+            return;
+        }
+
+        await auditarCO({
+            comando: 'CANCELAR AJUSTE',
+            payload: { id },
+            estado: 'OK',
+            resultado: 'Ajuste cancelado',
+            referenciaTabla: 'asistencia_limpieza_ajustes',
+            referenciaId: id
+        });
+
+        await message.reply(`🗑️ Ajuste ${id} cancelado.`);
+        return;
+    }
+
+    const historialCoHoyMatch = desc.match(/^HISTORIAL\s+CO(?:\s+HOY)?$/i);
+    if (historialCoHoyMatch) {
+        const { desde, hasta } = rangoHoyMx();
+        const rows = await listarHistorialCO(pool, { desde, hasta, limit: 20 });
+
+        if (!rows.length) {
+            await message.reply('📘 HISTORIAL CO HOY\nSin movimientos registrados.');
+            return;
+        }
+
+        const salida = ['📘 HISTORIAL CO HOY (últimos 20)'];
+        rows.forEach((r) => {
+            salida.push(`• [${moment(r.fecha).format('HH:mm')}] ${r.autor || '-'} | ${r.comando} | ${r.estado}`);
+        });
+
+        await message.reply(salida.join('\n'));
+        return;
+    }
+
+    const historialCoAutorMatch = descripcion.match(/^HISTORIAL\s+CO\s+AUTOR\s*:\s*(.+)$/i);
+    if (historialCoAutorMatch) {
+        const autorFiltro = historialCoAutorMatch[1].trim();
+        const rows = await listarHistorialCO(pool, { autor: autorFiltro, limit: 20 });
+
+        if (!rows.length) {
+            await message.reply(`📘 HISTORIAL CO (${autorFiltro})\nSin movimientos registrados.`);
+            return;
+        }
+
+        const salida = [`📘 HISTORIAL CO (${autorFiltro})`];
+        rows.forEach((r) => {
+            salida.push(`• [${moment(r.fecha).format('DD/MM HH:mm')}] ${r.comando} | ${r.estado}`);
+        });
+
+        await message.reply(salida.join('\n'));
+        return;
+    }
+
+    if (desc === 'PERMISOS RESUMEN' || desc === 'PERMISOS LIMITES') {
+        const mesIso = fecha.clone().format('YYYY-MM');
+        const rep = await reportePermisosDelMes(pool, mesIso);
+        if (!rep.ok) {
+            await message.reply(`❌ Error al consultar permisos: ${rep.error || 'sin detalle'}`);
+            return;
+        }
+
+        const lineas = [
+            `📋 PERMISOS ${mesIso}`,
+            `Total: ${rep.resumen.total} | Aprobados: ${rep.resumen.aprobados} | Pendientes: ${rep.resumen.pendientes}`,
+            `Cambio descanso: ${rep.resumen.porTipo.cambioDescanso} / 2 por persona al mes`,
+            `Turno doble: ${rep.resumen.porTipo.turnoDoble} | Intercambio: ${rep.resumen.porTipo.intercambio} | Descuento: ${rep.resumen.porTipo.descuento}`
+        ];
+
+        const preview = rep.permisos.slice(0, 8).map((p) => {
+            return `• ${moment(p.fecha).format('DD/MM')} | ${p.persona_key} | ${p.tipo_permiso} | ${p.estado}`;
+        });
+
+        await message.reply([...lineas, '', ...preview].join('\n'));
+        return;
+    }
+
+    if (desc === 'ALERTAS DEUDAS') {
+        const deudas = await listarDeudasPendientes(pool);
+        if (!deudas.ok) {
+            await message.reply(`❌ Error al consultar deudas: ${deudas.error || 'sin detalle'}`);
+            return;
+        }
+
+        const pendientes = deudas.deudasPendientes || [];
+        const vencidas = deudas.deudasVencidas || [];
+        if (!pendientes.length && !vencidas.length) {
+            await message.reply('✅ No hay deudas de turno doble pendientes.');
+            return;
+        }
+
+        const salida = ['💳 ALERTAS DEUDAS'];
+        if (pendientes.length) {
+            salida.push('', 'Pendientes:');
+            pendientes.slice(0, 10).forEach((d) => {
+                salida.push(`• ${d.persona_key} | paga ${moment(d.fecha_pago).format('DD/MM')} | faltan ${d.dias_para_vencer} días`);
+            });
+        }
+
+        if (vencidas.length) {
+            salida.push('', 'Vencidas:');
+            vencidas.slice(0, 10).forEach((d) => {
+                salida.push(`• ${d.persona_key} | venció ${moment(d.fecha_pago).format('DD/MM')} | ${Math.abs(d.dias_para_vencer)} días`);
+            });
+        }
+
+        await message.reply(salida.join('\n'));
         return;
     }
 
@@ -1468,6 +1884,151 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
         }
     }
 
+    if (flujoActivo && !message.hasMedia && flujoActivo.tipo === 'PERMISO_GUIADO') {
+        const valor = (descripcion || '').trim();
+
+        if (flujoActivo.paso === 0) {
+            const area = resolverAreaAsistencia(valor);
+            if (!area) {
+                await message.reply('⚠️ Opción inválida. Responde 1 (LIMPIEZA) o 2 (MTTO).');
+                return;
+            }
+
+            flujoActivo.data.area = area;
+            flujoActivo.paso = 1;
+            await message.reply(guiaPermisoMenuNombres(area, opcionesPersonalPermiso(area)));
+            return;
+        }
+
+        if (flujoActivo.paso === 1) {
+            const persona = resolverPersonaPermisoPorArea(flujoActivo.data.area, valor);
+            if (!persona) {
+                await message.reply('⚠️ Persona inválida. Responde número o nombre exacto.');
+                return;
+            }
+
+            flujoActivo.data.persona = persona;
+            flujoActivo.paso = 2;
+            await message.reply(guiaPermisoPaso3Dia());
+            return;
+        }
+
+        if (flujoActivo.paso === 2) {
+            const fechaPermiso = parseFechaPermiso(valor, fecha);
+            if (!fechaPermiso) {
+                await message.reply('⚠️ Fecha inválida. Usa DD/MM, DD/MM/YYYY o YYYY-MM-DD.');
+                return;
+            }
+
+            flujoActivo.data.fechaPermiso = fechaPermiso;
+            flujoActivo.paso = 3;
+            await message.reply(guiaPermisoPaso4Razon());
+            return;
+        }
+
+        if (flujoActivo.paso === 3) {
+            if (!valor) {
+                await message.reply('⚠️ Escribe un motivo para el permiso.');
+                return;
+            }
+
+            flujoActivo.data.motivo = valor;
+            flujoActivo.paso = 4;
+            await message.reply(guiaPermisoPaso5Tipo());
+            return;
+        }
+
+        if (flujoActivo.paso === 4) {
+            const tipoPermiso = normalizarTipoPermisoInput(valor);
+            const persona = flujoActivo.data.persona;
+            const fechaPermiso = flujoActivo.data.fechaPermiso;
+            const motivo = flujoActivo.data.motivo;
+
+            const limites = await validarLimitesPermisoMes(pool, persona.key, tipoPermiso, fechaPermiso);
+            if (!limites.ok) {
+                delete flujosSupervisor[clave];
+                await message.reply(limites.alerta || '⚠️ Límite mensual alcanzado para este permiso.');
+                return;
+            }
+
+            const cobertura = await validarCoberturaTurno(pool, persona.key, fechaPermiso, MARCADOR_PERSONAL, EQUIPO_INGENIERIA);
+            if (!cobertura.ok && cobertura.critico) {
+                delete flujosSupervisor[clave];
+                await message.reply(cobertura.msg || '⚠️ No hay cobertura para este permiso.');
+                return;
+            }
+
+            const guardado = await registrarPermisoConAprobacion(pool, {
+                fecha: fechaPermiso,
+                personaKey: persona.key,
+                area: flujoActivo.data.area,
+                tipoPermiso,
+                motivo,
+                creadoPor: nombreAutor
+            });
+
+            delete flujosSupervisor[clave];
+
+            if (!guardado.ok) {
+                await message.reply(`❌ No se pudo registrar permiso: ${guardado.error || 'sin detalle'}`);
+                return;
+            }
+
+            await message.reply(
+                `📋 Permiso registrado\n` +
+                `ID: ${guardado.id}\n` +
+                `Persona: ${persona.nombre}\n` +
+                `Fecha: ${fechaPermiso.format('DD/MM/YYYY')}\n` +
+                `Tipo: ${tipoPermiso.replace(/_/g, ' ')}\n` +
+                `Estado: PENDIENTE_APROBACION\n\n` +
+                `Si quedó pendiente, confirma tipo:\n` +
+                `CONFIRMAR PERMISO ${guardado.id} | DESCUENTO SUELDO\n\n` +
+                `Luego aprueba:\n` +
+                `APROBAR PERMISO ${guardado.id}`
+            );
+            return;
+        }
+    }
+
+    if (flujoActivo && !message.hasMedia && flujoActivo.tipo === 'CONFIRMAR_PERMISO_DETALLE') {
+        const valor = (descripcion || '').trim();
+        const fechaComp = parseFechaPermiso(valor, fecha);
+
+        if (!fechaComp) {
+            await message.reply('⚠️ Fecha inválida. Usa DD/MM, DD/MM/YYYY o YYYY-MM-DD.');
+            return;
+        }
+
+        const id = Number.parseInt(flujoActivo.data.id, 10);
+        const tipoPermiso = flujoActivo.data.tipoPermiso || '';
+        const confirmacion = await confirmarTipoPermiso(pool, id, tipoPermiso, nombreAutor, {
+            fechaPago: fechaComp.format('YYYY-MM-DD')
+        });
+
+        delete flujosSupervisor[clave];
+
+        if (!confirmacion.ok) {
+            await message.reply(`⚠️ No se pudo confirmar tipo en permiso ${id}: ${confirmacion.error || 'sin detalle'}`);
+            return;
+        }
+
+        await message.reply(
+            `🧾 Tipo confirmado y compensación registrada\n` +
+            `ID: ${confirmacion.permiso?.id}\n` +
+            `Tipo: ${(confirmacion.permiso?.tipo_permiso || '').replace(/_/g, ' ')}\n` +
+            `Compensa/Paga: ${moment(confirmacion.permiso?.fecha_pago).format('DD/MM/YYYY')}\n` +
+            `Estado: ${confirmacion.permiso?.estado || 'PENDIENTE_APROBACION'}\n\n` +
+            `Siguiente paso: APROBAR PERMISO ${confirmacion.permiso?.id}`
+        );
+        return;
+    }
+
+    if (!message.hasMedia && ['GUIA PERMISO', 'NUEVO PERMISO', 'INICIAR PERMISO'].includes(desc)) {
+        flujosSupervisor[clave] = { tipo: 'PERMISO_GUIADO', paso: 0, data: {} };
+        await message.reply(guiaPermisoMenuEquipos());
+        return;
+    }
+
     if (!message.hasMedia && COMANDOS_GUIA_PENDIENTE.includes(desc)) {
         iniciarFlujoPendiente(clave);
         await message.reply(
@@ -1476,18 +2037,6 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
             'Puedes escribir CANCELAR en cualquier momento.\n' +
             'Al terminar, envia una o varias fotos y se ligaran al pendiente.\n\n' +
             siguientePreguntaPendiente(0)
-        );
-        return;
-    }
-
-    if (!message.hasMedia && COMANDOS_GUIA_MATERIAL.includes(desc)) {
-        iniciarFlujoMaterial(clave);
-        await message.reply(
-            '🧭 Modo guiado de Material/Insumo activado.\n' +
-            'Responde un campo por mensaje.\n' +
-            'Puedes escribir CANCELAR en cualquier momento.\n' +
-            'Al terminar, envia una o varias fotos y se ligaran al material/insumo.\n\n' +
-            siguientePreguntaMaterial(0)
         );
         return;
     }
@@ -1554,57 +2103,6 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
         return;
     }
 
-    if (flujoActivo && !message.hasMedia && flujoActivo.tipo === 'MATERIAL') {
-        const resultadoPaso = procesarPasoMaterial({
-            flujo: flujoActivo,
-            respuesta: descripcion
-        });
-
-        if (!resultadoPaso.ok) {
-            await message.reply(`⚠️ ${resultadoPaso.msg}`);
-            return;
-        }
-
-        if (!resultadoPaso.finalizado) {
-            await message.reply(siguientePreguntaMaterial(flujoActivo.paso));
-            return;
-        }
-
-        const datos = resultadoPaso.data;
-        delete flujosSupervisor[clave];
-
-        const idMaterial = await registrarMaterial({
-            solicitante: nombreAutor,
-            grupo: chat.name,
-            material: datos.material,
-            cantidad: datos.cantidad,
-            unidad: datos.unidad,
-            prioridad: datos.prioridad,
-            area: datos.area,
-            justificacion: datos.justificacion,
-            creadoPor: nombreAutor
-        });
-
-        ultimosMateriales[clave] = idMaterial;
-        logPersistencia({
-            tabla: 'materiales_supervisor',
-            id: idMaterial,
-            autor: nombreAutor,
-            grupo: chat.name,
-            mensajeId: message.id._serialized
-        });
-
-        await message.reply(
-            `✅ Material/Insumo registrado con captura guiada\n\n` +
-            `ID: ${idMaterial}\n` +
-            `Material: ${datos.material}\n` +
-            `Prioridad: ${datos.prioridad}\n\n` +
-            `📸 Puedes enviar una o varias fotos para ligar evidencia a este material/insumo.`
-        );
-
-        return;
-    }
-
     if (flujoActivo && !message.hasMedia && flujoActivo.tipo === 'PROYECTO') {
         const resultadoPaso = procesarPasoProyecto({
             flujo: flujoActivo,
@@ -1665,7 +2163,6 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
     let tipoRegistro = null;
 
     if (desc.startsWith('PENDIENTE:')) tipoRegistro = 'PENDIENTE';
-    else if (desc.startsWith('MATERIAL:')) tipoRegistro = 'MATERIAL';
     else if (desc.startsWith('PROYECTO:')) tipoRegistro = 'PROYECTO';
 
     console.log('TIPO REGISTRO:', tipoRegistro);
@@ -1733,8 +2230,8 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
         await message.reply(`🔐 PERMISOS | CENTRO OPERATIVO SHP1
 
 ✅ HABILITADO
-• Registro guiado: pendientes, materiales e insumos, proyectos.
-• Registro libre: PENDIENTE:, MATERIAL:, PROYECTO:.
+• Registro guiado: pendientes y proyectos.
+• Registro libre: PENDIENTE:, PROYECTO:.
 • Cierre: CERRAR <ID> y CERRAR PREVENTIVO <ID>.
 • Consultas: LISTAR, ABIERTOS, CERRADOS, COMPLETADOS, HISTORICO.
 • Preventivos: LISTAR PREVENTIVOS, PREVENTIVOS CERRADOS.
@@ -1784,33 +2281,6 @@ CANCELAR — Cancela guía activa`);
         return;
     }
 
-    if (desc === 'AYUDA MATERIALES' || desc === 'AYUDA INSUMOS') {
-        await message.reply(`📦 REQUISICIÓN DE MATERIAL
-
-MODO GUIADO (recomendado):
-GUIA MATERIAL o GUIA INSUMO
-
-MODO FORMATO LIBRE:
-MATERIAL:
-Taladro de impacto Milwaukee
-CANTIDAD:
-1
-UNIDAD:
-PZA
-PRIORIDAD:
-ALTA
-AREA:
-Andén 2
-JUSTIFICACION:
-Sustituir herramienta dañada.
-
-FOTOS:
-Después de registrar, envía una o varias imágenes para ligar evidencia al material/insumo.
-
-CANCELAR — Cancela guía activa`);
-        return;
-    }
-
     if (desc === 'AYUDA PROYECTOS') {
         await message.reply(`🏗️ REGISTRO DE PROYECTOS
 
@@ -1847,7 +2317,8 @@ CANCELAR — Cancela guía activa`);
     if (desc === 'AYUDA EVIDENCIAS') {
         await message.reply(`📸 EVIDENCIAS
 
-Las fotografías enviadas después de registrar un pendiente, material o proyecto quedarán ligadas automáticamente al último registro creado por el mismo usuario.
+Las fotografías enviadas después de registrar un pendiente o proyecto quedarán ligadas automáticamente al último registro creado por el mismo usuario.
+Las fotografías enviadas después de registrar un pendiente o proyecto quedarán ligadas automáticamente al último registro creado por el mismo usuario.
 
 Puedes enviar una o varias fotografías.
 
@@ -2060,25 +2531,6 @@ HISTORICO PREVENTIVOS — Alias de preventivos cerrados.`);
     }
 
     // =========================
-    // MATERIALES
-    // =========================
-
-    if (desc === 'MATERIALES') {
-
-        const rows = await listarMaterialesSupervisor();
-        let respuesta = '📦 MATERIALES PENDIENTES\n\n';
-
-        rows.forEach(r => {
-            respuesta += `[${r.id}] ${r.prioridad}\n${r.descripcion}\n\n`;
-        });
-
-        if (rows.length === 0) respuesta = '✅ No hay materiales pendientes';
-
-        await message.reply(respuesta);
-        return;
-    }
-
-    // =========================
     // CERRAR PREVENTIVO
     // =========================
 
@@ -2273,55 +2725,6 @@ HISTORICO PREVENTIVOS — Alias de preventivos cerrados.`);
     }
 
     // =========================
-    // REGISTRAR MATERIAL
-    // =========================
-
-    if (tipoRegistro === 'MATERIAL') {
-
-        const material = descripcion
-            .split('CANTIDAD:')[0]
-            .replace(/MATERIAL:/i, '')
-            .trim();
-
-        const cantidad      = descripcion.match(/CANTIDAD:\s*(.+)/i)?.[1]?.trim() || null;
-        const unidad        = descripcion.match(/UNIDAD:\s*(.+)/i)?.[1]?.trim() || '';
-        const prioridad     = descripcion.match(/PRIORIDAD:\s*(.+)/i)?.[1]?.trim() || 'MEDIA';
-        const area          = descripcion.match(/AREA:\s*(.+)/i)?.[1]?.trim() || '';
-        const justificacion = descripcion.match(/JUSTIFICACION:\s*([\s\S]*)/i)?.[1]?.trim() || '';
-
-        const idMaterial = await registrarMaterial({
-            solicitante:  nombreAutor,
-            grupo:        chat.name,
-            material,
-            cantidad:     cantidad || null,
-            unidad,
-            prioridad:    prioridad.toUpperCase(),
-            area,
-            justificacion,
-            creadoPor:    nombreAutor
-        });
-
-        ultimosMateriales[clave] = idMaterial;
-        console.log('🧠 Último material:', clave, '=>', idMaterial);
-        logPersistencia({
-            tabla: 'materiales_supervisor',
-            id: idMaterial,
-            autor: nombreAutor,
-            grupo: chat.name,
-            mensajeId: message.id._serialized
-        });
-
-        await message.reply(`✅ Material registrado\n\nID: ${idMaterial}\n\n📸 Puedes enviar una o varias fotos para ligar evidencia a este material/insumo.`);
-
-        if (rutaEvidencia) {
-            await guardarEvidenciaMaterial({ materialId: idMaterial, rutaEvidencia });
-            console.log('✅ EVIDENCIA DE MATERIAL RELACIONADA');
-        }
-
-        return;
-    }
-
-    // =========================
     // REGISTRAR PROYECTO
     // =========================
 
@@ -2390,17 +2793,11 @@ HISTORICO PREVENTIVOS — Alias de preventivos cerrados.`);
     if (rutaEvidencia) {
 
         const pendienteId = ultimosPendientes[clave];
-        const materialId  = ultimosMateriales[clave];
         const proyectoId  = ultimosProyectos[clave];
 
         if (pendienteId) {
             await guardarEvidenciaPendiente({ pendienteId, rutaEvidencia });
             console.log('✅ EVIDENCIA DE PENDIENTE RELACIONADA (recuperada)');
-        }
-
-        if (materialId) {
-            await guardarEvidenciaMaterial({ materialId, rutaEvidencia });
-            console.log('✅ EVIDENCIA DE MATERIAL RELACIONADA (recuperada)');
         }
 
         if (proyectoId) {

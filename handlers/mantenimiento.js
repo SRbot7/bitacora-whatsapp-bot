@@ -12,6 +12,7 @@ const { logPersistencia } = require('../lib/persistence-log');
 const AUTORES_MTTO_POR_NUMERO = {
     '202013803569317@lid': 'Eliezer Romero Romero',
     '68028557435039@lid': 'Flavio Cruz Santiago',
+    '33114248208520@lid': 'Saul Romero Romero',
     '189795108180057@lid': 'Saul Romero Romero',
     '189795108180057:33@lid': 'Saul Romero Romero'
 };
@@ -62,6 +63,10 @@ function detectarUbicacion(texto = '') {
 }
 
 function resolverAutorMantenimiento(nombreAutor = '', autorNumero = '') {
+    if (/ctamez/i.test(String(nombreAutor || ''))) {
+        return 'Saul Romero Romero';
+    }
+
     if (autorPermitidoPorGrupo(nombreAutor, 'Asistencia SHP1 Pachuca')) {
         return nombreAutor;
     }

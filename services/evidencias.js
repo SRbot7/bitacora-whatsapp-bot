@@ -18,21 +18,6 @@ async function guardarEvidenciaPendiente({ pendienteId, rutaEvidencia }) {
 
 
 // =========================
-// EVIDENCIA - MATERIAL
-// =========================
-
-async function guardarEvidenciaMaterial({ materialId, rutaEvidencia }) {
-    await pool.query(
-        `
-        INSERT INTO evidencias_materiales (material_id, ruta, nombre_archivo)
-        VALUES ($1, $2, $3)
-        `,
-        [materialId, rutaEvidencia, path.basename(rutaEvidencia)]
-    );
-}
-
-
-// =========================
 // EVIDENCIA - PROYECTO
 // =========================
 
@@ -49,6 +34,5 @@ async function guardarEvidenciaProyecto({ proyectoId, rutaEvidencia }) {
 
 module.exports = {
     guardarEvidenciaPendiente,
-    guardarEvidenciaMaterial,
     guardarEvidenciaProyecto
 };

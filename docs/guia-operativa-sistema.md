@@ -174,12 +174,11 @@ Es el modulo de operacion central.
 Responsabilidad:
 
 1. Registrar pendientes.
-2. Registrar materiales e insumos.
-3. Registrar proyectos.
-4. Cerrar pendientes y preventivos.
-5. Consultar abiertos, cerrados, historico y alertas.
-6. Mostrar ayudas y guias paso a paso.
-7. Consultar asistencia y estado en turno.
+2. Registrar proyectos.
+3. Cerrar pendientes y preventivos.
+4. Consultar abiertos, cerrados, historico y alertas.
+5. Mostrar ayudas y guias paso a paso.
+6. Consultar asistencia y estado en turno.
 
 ## 8. Comandos de Centro Operativo
 
@@ -187,44 +186,40 @@ Comandos principales activos:
 
 1. `AYUDA`
 2. `AYUDA PENDIENTES`
-3. `AYUDA MATERIALES`
-4. `AYUDA PROYECTOS`
-5. `AYUDA EVIDENCIAS`
-6. `AYUDA PREVENTIVOS`
-7. `AYUDA ALERTAS`
-8. `AYUDA HISTORICO`
-9. `REPORTE`
-10. `RESUMEN`
-11. `LISTAR`
-12. `ABIERTOS`
-13. `CERRADOS`
-14. `COMPLETADOS`
-15. `HISTORICO`
-16. `LISTAR CERRADOS`
-17. `PREVENTIVOS`
-18. `LISTAR PREVENTIVOS`
-19. `PREVENTIVOS CERRADOS`
-20. `LISTAR PREVENTIVOS CERRADOS`
-21. `HISTORICO PREVENTIVOS`
-22. `ALERTAS`
-23. `ALERTAS ASISTENCIA`
-24. `ASISTENCIA`
-25. `ASISTENCIA HOY`
-26. `EN TURNO`
-27. `RIESGOS`
-28. `MATERIALES`
-29. `PROYECTOS`
-30. `CERRAR <ID>`
-31. `CERRAR PREVENTIVO <ID>`
+3. `AYUDA PROYECTOS`
+4. `AYUDA EVIDENCIAS`
+5. `AYUDA PREVENTIVOS`
+6. `AYUDA ALERTAS`
+7. `AYUDA HISTORICO`
+8. `REPORTE`
+9. `RESUMEN`
+10. `LISTAR`
+11. `ABIERTOS`
+12. `CERRADOS`
+13. `COMPLETADOS`
+14. `HISTORICO`
+15. `LISTAR CERRADOS`
+16. `PREVENTIVOS`
+17. `LISTAR PREVENTIVOS`
+18. `PREVENTIVOS CERRADOS`
+19. `LISTAR PREVENTIVOS CERRADOS`
+20. `HISTORICO PREVENTIVOS`
+21. `ALERTAS`
+22. `ALERTAS ASISTENCIA`
+23. `ASISTENCIA`
+24. `ASISTENCIA HOY`
+25. `EN TURNO`
+26. `RIESGOS`
+27. `PROYECTOS`
+28. `CERRAR <ID>`
+29. `CERRAR PREVENTIVO <ID>`
 
 Guias disponibles:
 
 1. `GUIA PENDIENTE`
-2. `GUIA MATERIAL`
-3. `GUIA INSUMO`
-4. `GUIA PROYECTO`
-5. `CANCELAR`
-6. `SALIR`
+2. `GUIA PROYECTO`
+3. `CANCELAR`
+4. `SALIR`
 
 ## 9. Dashboard
 

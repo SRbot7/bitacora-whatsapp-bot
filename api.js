@@ -46,10 +46,17 @@ const LIMPIEZA_GROUP_WINDOW_MINUTES = Math.max(
     Number.parseInt(process.env.LIMPIEZA_GROUP_WINDOW_MINUTES || '90', 10) || 90
 );
 
+const LIMPIEZA_PERSONA_KEYS = MARCADOR_PERSONAL.map((persona) => persona.key);
+const LIMPIEZA_NOMBRES_CANONICOS = MARCADOR_PERSONAL.map((persona) => persona.nombre);
+
 const GRUPO_ASISTENCIA_INGENIERIA = 'Asistencia SHP1 Pachuca';
 const ASISTENCIA_RETARDO_MINUTOS = Math.max(
     1,
     Number.parseInt(process.env.ASISTENCIA_RETARDO_MINUTOS || '60', 10) || 60
+);
+const ASISTENCIA_FALTA_MINUTOS = Math.max(
+    ASISTENCIA_RETARDO_MINUTOS + 1,
+    Number.parseInt(process.env.ASISTENCIA_FALTA_MINUTOS || '120', 10) || 120
 );
 
 const EQUIPO_INGENIERIA = [
@@ -58,7 +65,7 @@ const EQUIPO_INGENIERIA = [
         nombre: 'Saul Romero Romero',
         puesto: 'Electromecanico',
         turno: '1er turno 06:00-14:00',
-        aliases: ['saul romero romero', 'saul romero', 'saul']
+        aliases: ['saul romero romero', 'saul romero', 'saul', 'ctamez2016b', '~ ctamez2016b']
     },
     {
         key: 'eliezer',
@@ -71,10 +78,11 @@ const EQUIPO_INGENIERIA = [
         key: 'flavio',
         nombre: 'Flavio Cruz Santiago',
         puesto: 'Multitecnico',
-        turno: '3er turno 22:00-06:00',
+        turno: '3er turno 23:00-06:00',
         aliases: ['flavio cruz santiago', 'flavio cruz', 'flavio']
     }
 ];
+const INGENIERIA_DESCANSO_DOMINGO_KEYS = new Set(['saul', 'eliezer', 'flavio']);
 
 app.use(cors());
 app.use(express.json());
@@ -144,6 +152,22 @@ function getPagination(req) {
     return { page, pageSize, offset };
 }
 
+function aplicarFiltroPlantillaLimpieza(where, params, idxStart) {
+    let idx = idxStart;
+
+    const keyPlaceholders = LIMPIEZA_PERSONA_KEYS.map(() => `$${idx++}`);
+    params.push(...LIMPIEZA_PERSONA_KEYS);
+
+    const nombresPlaceholders = LIMPIEZA_NOMBRES_CANONICOS.map(() => `autor ILIKE $${idx++}`);
+    params.push(...LIMPIEZA_NOMBRES_CANONICOS.map((nombre) => `%${nombre}%`));
+
+    where.push(
+        `((persona_key IS NOT NULL AND persona_key IN (${keyPlaceholders.join(', ')})) OR (${nombresPlaceholders.join(' OR ')}))`
+    );
+
+    return idx;
+}
+
 function buildDateFilter({ from, to, column = 'fecha', idxStart = 1 }) {
     const where = [];
     const params = [];
@@ -168,6 +192,33 @@ function mod(valor, base) {
 
 function toDateOnlyIso(dateObj) {
     return dateObj.toISOString().slice(0, 10);
+}
+
+function esDescansoDominicalIngenieria(personaKey = '', fechaIso = '') {
+    if (!INGENIERIA_DESCANSO_DOMINGO_KEYS.has(String(personaKey || '').toLowerCase())) {
+        return false;
+    }
+
+    const raw = String(fechaIso || '').trim();
+    let dateOnly = raw;
+    if (!raw.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        const dt = new Date(raw);
+        if (Number.isNaN(dt.getTime())) {
+            return false;
+        }
+        dateOnly = toDateOnlyIso(dt);
+    }
+    const match = String(dateOnly || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) {
+        return false;
+    }
+
+    const year = Number.parseInt(match[1], 10);
+    const month = Number.parseInt(match[2], 10);
+    const day = Number.parseInt(match[3], 10);
+    const dt = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+
+    return dt.getUTCDay() === 0;
 }
 
 function startOfWeekMonday(dateInput) {
@@ -265,13 +316,22 @@ function resolverEstadoAsistenciaDiaria({
     }
 
     const limiteRetardo = new Date(inicioTurno.getTime() + (ASISTENCIA_RETARDO_MINUTOS * 60 * 1000));
+    const limiteFalta = new Date(inicioTurno.getTime() + (ASISTENCIA_FALTA_MINUTOS * 60 * 1000));
     const primer = primerReporte ? new Date(primerReporte) : null;
 
     if (!primer || Number.isNaN(primer.getTime())) {
+        return 'F';
+    }
+
+    if (primer <= limiteRetardo) {
+        return 'A';
+    }
+
+    if (primer <= limiteFalta) {
         return 'R';
     }
 
-    return primer <= limiteRetardo ? 'A' : 'R';
+    return 'F';
 }
 
 let tablaAjustesAsistenciaCreada = false;
@@ -326,6 +386,7 @@ function resolverIngenieriaPersona(autor = '') {
 
 function buildIngenieriaRows({ rows, personaKeyByAutor = false, mapaAjustes = new Map(), fechaContexto = '' }) {
     const mapa = new Map();
+    const fechaContextoIso = fechaContexto ? toDateOnlyIso(new Date(fechaContexto)) : '';
 
     for (const row of rows) {
         const persona = resolverIngenieriaPersona(row.autor);
@@ -390,14 +451,24 @@ function buildIngenieriaRows({ rows, personaKeyByAutor = false, mapaAjustes = ne
             fechas: new Set()
         };
 
-        const ajuste = fechaContexto ? mapaAjustes.get(`${persona.key}|${fechaContexto}`) || null : null;
-        let estado = ajuste?.tipo === 'PERMISO'
-            ? 'P'
-            : (agg.total_reportes > 0 || agg.total_evidencias > 0 ? 'A' : 'F');
+        const ajuste = fechaContextoIso ? mapaAjustes.get(`${persona.key}|${fechaContextoIso}`) || null : null;
+        const descansoDominical = fechaContextoIso
+            ? esDescansoDominicalIngenieria(persona.key, fechaContextoIso)
+            : false;
+        let estado = descansoDominical
+            ? 'D'
+            : ajuste?.tipo === 'PERMISO'
+                ? 'P'
+                : (agg.total_reportes > 0 || agg.total_evidencias > 0 ? 'A' : 'F');
+
+        if (ajuste?.tipo === 'LABORA' && descansoDominical) {
+            estado = agg.total_reportes > 0 || agg.total_evidencias > 0 ? 'A' : 'F';
+        }
+
         if (estado !== 'F' && agg.fechas.size === 1) {
             const [fechaUnica] = Array.from(agg.fechas.values());
             estado = resolverEstadoAsistenciaDiaria({
-                descanso: false,
+                descanso: descansoDominical && ajuste?.tipo !== 'LABORA',
                 permiso: ajuste?.tipo === 'PERMISO',
                 turno: persona.turno,
                 fechaIso: fechaUnica,
@@ -489,6 +560,7 @@ function buildIngenieriaMarcadorRows({ rows, weekStartDate, autorFiltro = '', ma
             };
 
             const ajuste = mapaAjustes.get(`${persona.key}|${dia.fecha}`) || null;
+            const descansoDominical = esDescansoDominicalIngenieria(persona.key, dia.fecha);
 
             // Si hay ajuste con LABORA, override a asistencia
             let estado;
@@ -496,7 +568,7 @@ function buildIngenieriaMarcadorRows({ rows, weekStartDate, autorFiltro = '', ma
                 estado = 'A';
             } else {
                 estado = resolverEstadoAsistenciaDiaria({
-                    descanso: false,
+                    descanso: descansoDominical,
                     permiso: ajuste?.tipo === 'PERMISO',
                     turno: persona.turno,
                     fechaIso: dia.fecha,
@@ -542,49 +614,18 @@ async function queryIngenieriaByDateRange({ fechaInicio, fechaFin }) {
 
     const rowsRes = await pool.query(
         `
-        WITH base_mtto AS (
-            SELECT
-                fecha,
-                autor,
-                grupo,
-                COUNT(*)::int AS total_reportes,
-                0::int AS total_evidencias,
-                MIN(created_at) AS primer_reporte,
-                MAX(created_at) AS ultimo_reporte
-            FROM asistencia_mantenimiento_eventos
-            WHERE fecha >= $1
-              AND fecha <= $2
-              AND grupo ILIKE $3
-            GROUP BY fecha, autor, grupo
-        ),
-        base_legacy AS (
-            SELECT
-                fecha,
-                autor,
-                grupo,
-                total_reportes,
-                total_evidencias,
-                primer_reporte,
-                ultimo_reporte
-            FROM asistencia_limpieza_diaria
-            WHERE fecha >= $1
-              AND fecha <= $2
-              AND grupo ILIKE $3
-        ),
-        consolidado AS (
-            SELECT * FROM base_mtto
-            UNION ALL
-            SELECT * FROM base_legacy
-        )
         SELECT
             fecha,
             autor,
             grupo,
-            SUM(total_reportes)::int AS total_reportes,
-            SUM(total_evidencias)::int AS total_evidencias,
-            MIN(primer_reporte) AS primer_reporte,
-            MAX(ultimo_reporte) AS ultimo_reporte
-        FROM consolidado
+            COUNT(*)::int AS total_reportes,
+            0::int AS total_evidencias,
+            MIN(COALESCE(evento_at, ((created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City'))) AS primer_reporte,
+            MAX(COALESCE(evento_at, ((created_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Mexico_City'))) AS ultimo_reporte
+        FROM asistencia_mantenimiento_eventos
+        WHERE fecha >= $1
+          AND fecha <= $2
+          AND grupo ILIKE $3
         GROUP BY fecha, autor, grupo
         ORDER BY fecha ASC, autor ASC
         `,
@@ -648,7 +689,7 @@ app.get('/', (req, res) => {
 
 app.get('/api/v1/summary', async (req, res) => {
     try {
-        const [bitacora, limpieza, pendientes, preventivos, materiales, proyectos] = await Promise.all([
+        const [bitacora, limpieza, pendientes, preventivos, proyectos] = await Promise.all([
             pool.query(`SELECT COUNT(*)::int AS total FROM bitacora WHERE grupo = 'BITACORA-MTTO-SHP1'`),
             pool.query(`
                 SELECT COUNT(*)::int AS total
@@ -659,7 +700,6 @@ app.get('/api/v1/summary', async (req, res) => {
             `),
             pool.query(`SELECT COUNT(*)::int AS total FROM pendientes_supervisor WHERE estado = 'Pendiente'`),
             pool.query(`SELECT COUNT(*)::int AS total FROM pendientes_supervisor WHERE estado = 'Pendiente' AND categoria = 'PREVENTIVO'`),
-            pool.query(`SELECT COUNT(*)::int AS total FROM materiales_solicitados`),
             pool.query(`SELECT COUNT(*)::int AS total FROM proyectos_mtto`)
         ]);
 
@@ -668,7 +708,6 @@ app.get('/api/v1/summary', async (req, res) => {
             limpieza: limpieza.rows[0].total,
             pendientesAbiertos: pendientes.rows[0].total,
             pendientesPreventivos: preventivos.rows[0].total,
-            materiales: materiales.rows[0].total,
             proyectos: proyectos.rows[0].total
         });
     } catch (error) {
@@ -886,60 +925,6 @@ app.get('/api/v1/supervisor/completados', async (req, res) => {
     }
 });
 
-app.get('/api/v1/supervisor/materiales', async (req, res) => {
-    try {
-        const { page, pageSize, offset } = getPagination(req);
-        const { from, to, search, area, prioridad, estado } = req.query;
-
-        const where = [];
-        const params = [];
-        let idx = 1;
-
-        const dateFilter = buildDateFilter({ from, to, column: 'fecha', idxStart: idx });
-        where.push(...dateFilter.where);
-        params.push(...dateFilter.params);
-        idx = dateFilter.nextIdx;
-
-        if (search) {
-            where.push(`(material ILIKE $${idx} OR justificacion ILIKE $${idx})`);
-            params.push(`%${search}%`);
-            idx += 1;
-        }
-
-        if (area) {
-            where.push(`area ILIKE $${idx}`);
-            params.push(`%${area}%`);
-            idx += 1;
-        }
-
-        if (prioridad) {
-            where.push(`prioridad = $${idx}`);
-            params.push(prioridad.toUpperCase());
-            idx += 1;
-        }
-
-        if (estado) {
-            where.push(`estado = $${idx}`);
-            params.push(estado);
-        }
-
-        const data = await runPaginatedQuery({
-            baseFrom: 'FROM materiales_solicitados',
-            where,
-            params,
-            orderBy: 'ORDER BY fecha DESC, id DESC',
-            page,
-            pageSize,
-            offset
-        });
-
-        res.json(data);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Error al consultar materiales' });
-    }
-});
-
 app.get('/api/v1/supervisor/proyectos', async (req, res) => {
     try {
         const { page, pageSize, offset } = getPagination(req);
@@ -1011,26 +996,6 @@ app.get('/api/v1/supervisor/pendientes/:id/evidencias', async (req, res) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Error al consultar evidencias de pendientes' });
-    }
-});
-
-app.get('/api/v1/supervisor/materiales/:id/evidencias', async (req, res) => {
-    try {
-        const { id } = req.params;
-        const resultado = await pool.query(
-            `
-            SELECT *
-            FROM evidencias_materiales
-            WHERE material_id = $1
-            ORDER BY fecha ASC, id ASC
-            `,
-            [id]
-        );
-
-        res.json(resultado.rows);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Error al consultar evidencias de materiales' });
     }
 });
 
@@ -1258,6 +1223,8 @@ app.get('/api/v1/limpieza/asistencia', async (req, res) => {
             params.push(`%${grupo}%`);
         }
 
+        idx = aplicarFiltroPlantillaLimpieza(where, params, idx);
+
         const autoresExcluidos = obtenerAutoresExcluidosAsistencia();
         for (const autorExcluido of autoresExcluidos) {
             where.push(`autor NOT ILIKE $${idx++}`);
@@ -1311,6 +1278,8 @@ app.get('/api/v1/limpieza/asistencia-semanal', async (req, res) => {
             where.push(`grupo ILIKE $${idx++}`);
             params.push(`%${grupo}%`);
         }
+
+        idx = aplicarFiltroPlantillaLimpieza(where, params, idx);
 
         const autoresExcluidos = obtenerAutoresExcluidosAsistencia();
         for (const autorExcluido of autoresExcluidos) {
@@ -1406,6 +1375,8 @@ app.get('/api/v1/limpieza/asistencia-mensual', async (req, res) => {
             where.push(`grupo ILIKE $${idx++}`);
             params.push(`%${grupo}%`);
         }
+
+        idx = aplicarFiltroPlantillaLimpieza(where, params, idx);
 
         const autoresExcluidos = obtenerAutoresExcluidosAsistencia();
         for (const autorExcluido of autoresExcluidos) {
