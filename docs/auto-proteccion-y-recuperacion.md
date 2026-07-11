@@ -23,6 +23,15 @@
 - Configurar o refrescar cron:
   - npm run backup:setup
   - o bash scripts/setup-auto-protection.sh
+   - el script detecta la ruta real de `pm2` automaticamente para la tarea `@reboot`
+
+- Quick Tunnel (sin dominio, URL temporal):
+   - npm run tunnel:start
+   - el proceso escribe la URL en `runtime/quick-tunnel-url.txt`
+   - `bitacora-bot` publica automaticamente la URL actualizada en `Centro Operativo SHP1`
+   - comando manual en CO: `BOT URL` (o `BOT REENVIAR URL`) para reenviar enlace
+   - estado en CO: `BOT URL ESTADO` (URL vigente + última publicación + estado de rotación de token)
+   - el token compartido rota automaticamente y se guarda en `runtime/dashboard-share-token.txt`
 
 - Restaurar base de datos:
   - bash scripts/restore-db.sh backups/operaciones_YYYYMMDD_HHMMSS.sql

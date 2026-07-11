@@ -16,6 +16,8 @@ const {
     guardarMovimientosInsumosBitacora
 } = require('../services/bitacora-insumos');
 
+const BITACORA_GROUP_NAME = process.env.BITACORA_GROUP_NAME || 'BITACORA-MTTO-SHP1';
+
 const COMANDOS_GUIA_BITACORA = [
     'GUIA BITACORA',
     'GUIA BOTACORA',
@@ -154,7 +156,14 @@ async function manejarBitacora({ message, chat, textoOriginal, nombreAutor, fech
         .trim()
         .toLowerCase();
 
-    if (chatNombre !== 'bitacora-mtto-shp1') {
+    const chatPermitido = BITACORA_GROUP_NAME
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+
+    if (chatNombre !== chatPermitido) {
         console.log('⛔ Bloqueado en BITACORA: grupo no permitido para bitacora ->', chat.name);
         return;
     }

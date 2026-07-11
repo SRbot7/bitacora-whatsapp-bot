@@ -52,6 +52,11 @@ const {
     MARCADOR_PERSONAL
 } = require('../services/limpieza-personal');
 const {
+    ROLES_VALIDOS,
+    asignarRolLimpieza,
+    listarRolesLimpieza
+} = require('../services/limpieza-roles');
+const {
     validarLimitesPermisoMes,
     validarCoberturaTurno,
     registrarPermisoConAprobacion,
@@ -110,8 +115,14 @@ const COMANDOS = [
     'RIESGOS', 'PROYECTOS', 'LISTAR PROYECTOS'
 ];
 
-const GRUPO_ASISTENCIA_INGENIERIA = 'Asistencia SHP1 Pachuca';
-const GRUPO_LIMPIEZA_OPERATIVA = 'MELI SVC PACHUCA - BATIA LIMPIEZA';
+const BITACORA_GROUP_NAME = process.env.BITACORA_GROUP_NAME || 'BITACORA-MTTO-SHP1';
+const SUPERVISOR_GROUP_NAME = process.env.SUPERVISOR_GROUP_NAME || 'Centro Operativo SHP1';
+const GRUPO_ASISTENCIA_INGENIERIA = process.env.MANTENIMIENTO_ASISTENCIA_GROUP_NAME || 'Asistencia SHP1 Pachuca';
+const GRUPO_LIMPIEZA_OPERATIVA = process.env.LIMPIEZA_GROUP_NAME || 'MELI SVC PACHUCA - BATIA LIMPIEZA';
+const GRUPO_ASISTENCIA_LIMPIEZA = process.env.LIMPIEZA_ASISTENCIA_GROUP_NAME || 'Asistencia limpieza SHP1 Pachuca';
+const MANTENIMIENTO_BLOQUEADO_GROUP_NAME = process.env.MANTENIMIENTO_BLOQUEADO_GROUP_NAME || 'Mantenimiento SHP1';
+const AUTO_REPORTES_ACTIVOS = (process.env.AUTO_REPORTES_ACTIVOS || 'false').toLowerCase() === 'true';
+const ALERTAS_ASISTENCIA_ACTIVAS = (process.env.ALERTAS_ASISTENCIA_ACTIVAS || 'true').toLowerCase() === 'true';
 const EQUIPO_INGENIERIA = [
     {
         key: 'saul',
@@ -169,6 +180,87 @@ function limpiarTextoPlano(texto = '') {
         .toString()
         .replace(/\s+/g, ' ')
         .trim();
+}
+
+function construirAyudaCentroOperativoDinamica() {
+    const gruposConfigurados = [
+        BITACORA_GROUP_NAME,
+        SUPERVISOR_GROUP_NAME,
+        GRUPO_LIMPIEZA_OPERATIVA,
+        GRUPO_ASISTENCIA_LIMPIEZA,
+        GRUPO_ASISTENCIA_INGENIERIA
+    ];
+
+    const gruposBloqueados = [
+        MANTENIMIENTO_BLOQUEADO_GROUP_NAME
+    ];
+
+    const gruposEscuchadosEfectivos = gruposConfigurados.filter(
+        (grupo) => !gruposBloqueados.includes(grupo)
+    );
+
+    const gruposSalidaHabilitada = [
+        BITACORA_GROUP_NAME,
+        SUPERVISOR_GROUP_NAME,
+        GRUPO_ASISTENCIA_LIMPIEZA
+    ];
+
+    const lineas = [
+        '🔐 PERMISOS | CENTRO OPERATIVO SHP1',
+        '',
+        '✅ HABILITADO',
+        '• Registro guiado: pendientes y proyectos.',
+        '• Registro libre: PENDIENTE:, PROYECTO:.',
+        '• Cierre: CERRAR <ID>, CERRAR PREVENTIVO <ID>, CERRAR PROYECTO <ID>.',
+        '• Consultas: LISTAR, ABIERTOS, CERRADOS, COMPLETADOS, HISTORICO.',
+        '• Preventivos: LISTAR PREVENTIVOS, PREVENTIVOS CERRADOS.',
+        '• Reporte: REPORTE, RESUMEN OPERATIVO.',
+        '• Evidencias: fotos ligadas al ultimo registro del autor.',
+        '• Dashboard publico: BOT URL, BOT URL ESTADO.',
+        '• Control bot emergencia:',
+        '  - BOT STOP o BOT PAUSA (detener procesamiento)',
+        '  - BOT START o BOT REANUDAR (activar nuevamente)',
+        '  - BOT STATUS (ver estado), BOT RESET (reinicio operativo)',
+        '',
+        '⛔ FUNCIONES ACTUALMENTE DESACTIVADAS',
+        '• Asistencia desde Centro Operativo.',
+        '• Alertas de asistencia.',
+        '• Ajustes/permisos de asistencia.',
+        '',
+        '🧭 CONFIGURACION ACTIVA (dinamica)',
+        `• Reportes automaticos activos: ${AUTO_REPORTES_ACTIVOS ? 'SI' : 'NO'}`,
+        `• Grupo Centro Operativo: ${SUPERVISOR_GROUP_NAME}`,
+        '',
+        '• Grupos configurados (env):'
+    ];
+
+    gruposConfigurados.forEach((grupo) => {
+        lineas.push(`  - ${grupo}`);
+    });
+
+    lineas.push('');
+    lineas.push('• Grupos escuchados efectivos:');
+    gruposEscuchadosEfectivos.forEach((grupo) => {
+        lineas.push(`  - ${grupo}`);
+    });
+
+    lineas.push('');
+    lineas.push('• Grupos bloqueados (sin operacion):');
+    gruposBloqueados.forEach((grupo) => {
+        lineas.push(`  - ${grupo}`);
+    });
+
+    lineas.push('');
+    lineas.push('• Grupos con mensajes automaticos habilitados:');
+    gruposSalidaHabilitada.forEach((grupo) => {
+        lineas.push(`  - ${grupo}`);
+    });
+
+    lineas.push('');
+    lineas.push('ℹ️ Comando de referencia:');
+    lineas.push('AYUDA para ver el menu general de Centro Operativo.');
+
+    return lineas.join('\n');
 }
 
 function extraerLineaOCRDesdeObservaciones(observaciones = '') {
@@ -1014,6 +1106,41 @@ function parseFechaPermiso(valor = '', fechaBase = moment().tz('America/Mexico_C
     return null;
 }
 
+function normalizarRangoHorario(valor = '') {
+    const raw = String(valor || '').trim();
+    if (!raw) {
+        return '';
+    }
+
+    const match = raw.match(/(\d{1,2}:\d{2})\s*[-aA]\s*(\d{1,2}:\d{2})/);
+    if (!match) {
+        return '';
+    }
+
+    const pad = (hhmm = '') => {
+        const [hh, mm] = hhmm.split(':');
+        const hhNum = Number.parseInt(hh, 10);
+        const mmNum = Number.parseInt(mm, 10);
+        if (!Number.isInteger(hhNum) || !Number.isInteger(mmNum)) {
+            return '';
+        }
+
+        if (hhNum < 0 || hhNum > 23 || mmNum < 0 || mmNum > 59) {
+            return '';
+        }
+
+        return `${String(hhNum).padStart(2, '0')}:${String(mmNum).padStart(2, '0')}`;
+    };
+
+    const inicio = pad(match[1]);
+    const fin = pad(match[2]);
+    if (!inicio || !fin) {
+        return '';
+    }
+
+    return `${inicio}-${fin}`;
+}
+
 function requiereFechaCompensacion(tipoPermiso = '') {
     return ['CAMBIO_DESCANSO', 'TURNO_DOBLE'].includes(String(tipoPermiso || '').toUpperCase());
 }
@@ -1199,7 +1326,27 @@ async function procesarMenuAnidado({ flujo, respuesta, mensaje, clave }) {
         if (valor === '3') {
             return { comando: 'PERMISOS LIMITES' };
         }
-        return { siguiente: null, msg: '⚠️ Opción no válida. Responde 1-3 o 0 para atrás.' };
+        if (valor === '4') {
+            return {
+                siguiente: null,
+                msg: [
+                    '🛑 CONTROL DE EMERGENCIA DEL BOT',
+                    '',
+                    'Pausar de inmediato:',
+                    '• BOT STOP',
+                    '• BOT PAUSA',
+                    '',
+                    'Reanudar operación:',
+                    '• BOT START',
+                    '• BOT REANUDAR',
+                    '',
+                    'Diagnóstico y recuperación:',
+                    '• BOT STATUS',
+                    '• BOT RESET'
+                ].join('\n')
+            };
+        }
+        return { siguiente: null, msg: '⚠️ Opción no válida. Responde 1-4 o 0 para atrás.' };
     }
 
     return { siguiente: null, msg: '⚠️ Error al procesar menú.' };
@@ -1236,6 +1383,32 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
     
     console.log('🔍 DEBUG manejarSupervisor - descripcion:', descripcion.slice(0, 80));
     console.log('🔍 DEBUG - desc normalizado:', desc);
+
+    const comandoLegacyDesactivado = (
+        /^ALERTAS(?:\s+ASISTENCIA)?$/i.test(descripcion) ||
+        /^ASISTENCIA(?:\s+HOY)?$/i.test(descripcion) ||
+        /^EN\s+TURNO$/i.test(descripcion) ||
+        /^EN\s+SITIO$/i.test(descripcion) ||
+        /^RESUMEN\s+ASISTENCIA$/i.test(descripcion) ||
+        /^MARCADOR(?:\s+ASISTENCIA)?$/i.test(descripcion) ||
+        /^ASISTENCIA\s+LIMPIEZA\s*:/i.test(descripcion) ||
+        /^ASISTENCIA\s+(?:MTTO|MANTENIMIENTO)\s*:/i.test(descripcion) ||
+        /^MARCAR\s+PRESENTE\s*:/i.test(descripcion) ||
+        /^REGISTRAR\s+FALTA\s*:/i.test(descripcion) ||
+        /^PERMISOS(?:\s+CENTRO)?$/i.test(descripcion) ||
+        /^PERMISOS\s+LIMITES$/i.test(descripcion) ||
+        /^PERMISOS\s+PENDIENTES$/i.test(descripcion) ||
+        /^CONFIRMAR\s+PERMISO\s+/i.test(descripcion) ||
+        /^APROBAR\s+PERMISO\s+/i.test(descripcion) ||
+        /^ALERTAS\s+DEUDAS$/i.test(descripcion)
+    );
+    if (comandoLegacyDesactivado) {
+        await message.reply(
+            '⛔ Función desactivada en Centro Operativo.\n' +
+            'Operación vigente: asistencia directa en grupos de Asistencia SHP1 Pachuca y Asistencia limpieza SHP1 Pachuca.'
+        );
+        return;
+    }
     
     // MARCAR PRESENTE <NOMBRE>
     const marcarPresenteMatch = descripcion.match(/^marcar\s+presente\s*:\s*(.+)$/i);
@@ -1346,6 +1519,67 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
         } catch (error) {
             console.error('❌ Error registrando permiso:', error);
             await message.reply(`❌ Error: ${error.message}`);
+        }
+        return;
+    }
+
+    // CAMBIO TURNO MTTO: Persona | 07:00-15:00 | mañana
+    const cambioTurnoMttoMatch = descripcion.match(/^CAMBIO\s+TURNO\s+(?:MTTO|MANTENIMIENTO)\s*:\s*(.+?)\s*\|\s*(.+?)(?:\s*\|\s*(.+))?$/i);
+    if (cambioTurnoMttoMatch) {
+        const personaRaw = (cambioTurnoMttoMatch[1] || '').trim();
+        const horarioRaw = (cambioTurnoMttoMatch[2] || '').trim();
+        const fechaCambio = parseFechaPermiso(cambioTurnoMttoMatch[3] || 'hoy', fecha);
+
+        if (!personaRaw || !horarioRaw) {
+            await message.reply('⚠️ Formato inválido. Usa: CAMBIO TURNO MTTO: Nombre | 07:00-15:00 | mañana');
+            return;
+        }
+
+        if (!fechaCambio) {
+            await message.reply('⚠️ Fecha inválida. Usa mañana, DD/MM/YYYY o YYYY-MM-DD.');
+            return;
+        }
+
+        const horario = normalizarRangoHorario(horarioRaw);
+        if (!horario) {
+            await message.reply('⚠️ Horario inválido. Usa formato HH:mm-HH:mm (ejemplo 07:00-15:00).');
+            return;
+        }
+
+        const persona = resolverIngenieriaPersona(personaRaw);
+        if (!persona) {
+            await message.reply(`⚠️ Persona de MTTO no encontrada: "${personaRaw}".`);
+            return;
+        }
+
+        try {
+            await pool.query(
+                `INSERT INTO asistencia_limpieza_ajustes (fecha, persona_key, tipo, turno, motivo, creado_por, updated_at)
+                 VALUES ($1, $2, 'CAMBIO_TURNO', $3, $4, $5, NOW())
+                 ON CONFLICT (fecha, persona_key) DO UPDATE SET
+                    tipo = 'CAMBIO_TURNO',
+                    turno = EXCLUDED.turno,
+                    motivo = EXCLUDED.motivo,
+                    creado_por = EXCLUDED.creado_por,
+                    updated_at = NOW()`,
+                [
+                    fechaCambio.format('YYYY-MM-DD'),
+                    persona.key,
+                    horario,
+                    `Cambio turno MTTO ${horario}`,
+                    nombreAutor
+                ]
+            );
+
+            await message.reply(
+                `✅ Cambio de turno MTTO aplicado\n` +
+                `Persona: ${persona.nombre}\n` +
+                `Fecha: ${fechaCambio.format('DD/MM/YYYY')}\n` +
+                `Horario temporal: ${horario}`
+            );
+        } catch (error) {
+            console.error('❌ Error aplicando CAMBIO TURNO MTTO:', error);
+            await message.reply(`❌ No se pudo guardar cambio de turno: ${error.message}`);
         }
         return;
     }
@@ -1662,6 +1896,80 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
         return;
     }
 
+    const rolesLimpiezaPendientesMatch = desc.match(/^ROLES\s+LIMPIEZA\s+PENDIENTES$/i);
+    if (rolesLimpiezaPendientesMatch) {
+        const rows = listarRolesLimpieza({ soloSinClasificar: true });
+        if (!rows.length) {
+            await message.reply('✅ No hay personal en SIN_CLASIFICAR.');
+            return;
+        }
+
+        const lineas = ['🧾 ROLES LIMPIEZA | SIN_CLASIFICAR'];
+        rows.slice(0, 40).forEach((row) => {
+            lineas.push(`• ${row.nombre} [${row.key}]`);
+        });
+        lineas.push('', 'Para asignar usa: ROL LIMPIEZA: Nombre | LIMPIEZA|SITE_LEADER|TEAM_LEADER|SIN_CLASIFICAR');
+        await message.reply(lineas.join('\n'));
+        return;
+    }
+
+    const rolesLimpiezaMatch = desc.match(/^ROLES\s+LIMPIEZA$/i);
+    if (rolesLimpiezaMatch) {
+        const rows = listarRolesLimpieza({ soloSinClasificar: false });
+        if (!rows.length) {
+            await message.reply('ℹ️ Aún no hay personas en el catálogo de roles de limpieza.');
+            return;
+        }
+
+        const resumen = {
+            LIMPIEZA: 0,
+            SITE_LEADER: 0,
+            TEAM_LEADER: 0,
+            SIN_CLASIFICAR: 0
+        };
+
+        rows.forEach((row) => {
+            resumen[row.rol] = (resumen[row.rol] || 0) + 1;
+        });
+
+        const lineas = [
+            '🧾 ROLES LIMPIEZA',
+            `LIMPIEZA: ${resumen.LIMPIEZA} | SITE_LEADER: ${resumen.SITE_LEADER} | TEAM_LEADER: ${resumen.TEAM_LEADER} | SIN_CLASIFICAR: ${resumen.SIN_CLASIFICAR}`,
+            ''
+        ];
+
+        rows.slice(0, 40).forEach((row) => {
+            lineas.push(`• ${row.nombre} -> ${row.rol}`);
+        });
+
+        lineas.push('', 'Comando: ROL LIMPIEZA: Nombre | LIMPIEZA|SITE_LEADER|TEAM_LEADER|SIN_CLASIFICAR');
+        await message.reply(lineas.join('\n'));
+        return;
+    }
+
+    const rolLimpiezaSetMatch = descripcion.match(/^ROL\s+LIMPIEZA\s*:\s*(.+?)\s*\|\s*(LIMPIEZA|SITE[_\s-]?LEADER|TEAM[_\s-]?LEADER|SIN[_\s-]?CLASIFICAR)$/i);
+    if (rolLimpiezaSetMatch) {
+        const personaTexto = rolLimpiezaSetMatch[1].trim();
+        const rolRaw = rolLimpiezaSetMatch[2].trim().toUpperCase().replace(/[\s-]+/g, '_');
+
+        const asignacion = asignarRolLimpieza({
+            personaTexto,
+            rol: rolRaw
+        });
+
+        if (!asignacion.ok) {
+            await message.reply(`⚠️ No se pudo asignar rol. Roles válidos: ${Array.from(ROLES_VALIDOS).join(', ')}`);
+            return;
+        }
+
+        await message.reply(
+            `✅ Rol actualizado\n` +
+            `Persona: ${asignacion.persona.nombre}\n` +
+            `Rol: ${asignacion.persona.rol}`
+        );
+        return;
+    }
+
     if (desc === 'PERMISOS RESUMEN' || desc === 'PERMISOS LIMITES') {
         const mesIso = fecha.clone().format('YYYY-MM');
         const rep = await reportePermisosDelMes(pool, mesIso);
@@ -1840,7 +2148,7 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
                 const idAsistencia = await registrarAsistenciaLimpieza({
                     fecha,
                     autor: persona,
-                    grupo: GRUPO_LIMPIEZA_OPERATIVA,
+                    grupo: GRUPO_ASISTENCIA_LIMPIEZA,
                     fuenteRegistro: 'MANUAL',
                     reportesIncremento: 1,
                     evidenciasIncremento: 0
@@ -2245,28 +2553,7 @@ async function manejarSupervisor({ message, chat, textoOriginal, nombreAutor, fe
         desc === 'AYUDA CENTRO' ||
         desc === 'AYUDA CENTRO OPERATIVO'
     ) {
-        await message.reply(`🔐 PERMISOS | CENTRO OPERATIVO SHP1
-
-✅ HABILITADO
-• Registro guiado: pendientes y proyectos.
-• Registro libre: PENDIENTE:, PROYECTO:.
-• Cierre: CERRAR <ID>, CERRAR PREVENTIVO <ID>, CERRAR PROYECTO <ID>.
-• Consultas: LISTAR, ABIERTOS, CERRADOS, COMPLETADOS, HISTORICO.
-• Limpieza/permisos: LISTAR (incluye permisos pendientes), ABIERTOS (incluye conteo), PERMISOS LIMITES.
-• Resolver permisos: CONFIRMAR PERMISO <ID> | TIPO | [DD/MM/YYYY], APROBAR PERMISO <ID>.
-• Preventivos: LISTAR PREVENTIVOS, PREVENTIVOS CERRADOS.
-• Asistencia: ASISTENCIA, ASISTENCIA HOY, EN TURNO, MARCADOR, RESUMEN ASISTENCIA.
-• Alertas: ALERTAS, ALERTAS ASISTENCIA.
-• Deudas de turno doble: ALERTAS DEUDAS.
-• Reporte: REPORTE, RESUMEN OPERATIVO.
-• Evidencias: fotos ligadas al último registro del autor.
-
-🚫 RESTRINGIDO
-• Responder automáticamente en grupos fuera de alcance.
-• Operaciones sobre grupos bloqueados por configuración.
-
-ℹ️ Comando de referencia:
-AYUDA para ver el menú general de Centro Operativo.`);
+        await message.reply(construirAyudaCentroOperativoDinamica());
         return;
     }
 
@@ -2427,7 +2714,7 @@ Estas alertas se generan cuando el personal en turno no manda evidencia dentro d
         const idAsistencia = await registrarAsistenciaLimpieza({
             fecha,
             autor: persona,
-            grupo: GRUPO_LIMPIEZA_OPERATIVA,
+            grupo: GRUPO_ASISTENCIA_LIMPIEZA,
             fuenteRegistro: 'MANUAL',
             reportesIncremento: 1,
             evidenciasIncremento: 0

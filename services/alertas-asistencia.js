@@ -15,9 +15,13 @@ const ALERTA_ASISTENCIA_FALTA_MIN = Math.max(
     ALERTA_ASISTENCIA_TOLERANCIA_MIN + 1,
     Number.parseInt(process.env.ALERTA_ASISTENCIA_FALTA_MIN || '120', 10) || 120
 );
+const ALERTA_ASISTENCIA_ANTICIPO_MIN = Math.max(
+    0,
+    Number.parseInt(process.env.ALERTA_ASISTENCIA_ANTICIPO_MIN || '30', 10) || 30
+);
 
-const GRUPO_LIMPIEZA_ALERTAS = 'MELI SVC PACHUCA - BATIA LIMPIEZA';
-const GRUPO_INGENIERIA_ALERTAS = 'Asistencia SHP1 Pachuca';
+const GRUPO_LIMPIEZA_ALERTAS = process.env.LIMPIEZA_GROUP_NAME || 'Asistencia limpieza SHP1 Pachuca';
+const GRUPO_INGENIERIA_ALERTAS = process.env.MANTENIMIENTO_ASISTENCIA_GROUP_NAME || 'Asistencia SHP1 Pachuca';
 
 const ALERTAS_ASISTENCIA_TURNO = MARCADOR_PERSONAL.map((persona) => {
     const horario = extraerHorarioTurno(persona.turno) || { turnoInicio: '00:00', turnoFin: '23:59' };
@@ -104,7 +108,7 @@ async function obtenerAjusteAsistencia(pool, { fecha, personaKey }) {
     try {
         const resultado = await pool.query(
             `
-            SELECT tipo
+                        SELECT tipo, turno, motivo
             FROM asistencia_limpieza_ajustes
             WHERE fecha = $1
               AND persona_key = $2
@@ -121,6 +125,25 @@ async function obtenerAjusteAsistencia(pool, { fecha, personaKey }) {
 
         throw error;
     }
+}
+
+function aplicarAjusteTurnoIngenieria(persona = {}, ajuste = null) {
+    const turnoAjuste = String(ajuste?.turno || '').trim();
+    if (ajuste?.tipo !== 'CAMBIO_TURNO' || !turnoAjuste) {
+        return persona;
+    }
+
+    const horario = extraerHorarioTurno(turnoAjuste);
+    if (!horario) {
+        return persona;
+    }
+
+    return {
+        ...persona,
+        turno: `Ajuste ${turnoAjuste}`,
+        turnoInicio: horario.turnoInicio,
+        turnoFin: horario.turnoFin
+    };
 }
 
 async function existeActividadTurno(pool, { persona, inicio, fin }) {
@@ -240,7 +263,7 @@ async function obtenerAlertasAsistenciaLimpieza(pool, ahoraInput = null) {
 
         const reportoActividad = await existeActividadTurno(pool, {
             persona,
-            inicio: ventana.inicio,
+            inicio: ventana.inicio.clone().subtract(ALERTA_ASISTENCIA_ANTICIPO_MIN, 'minutes'),
             fin: ahoraMx
         });
 
@@ -365,11 +388,12 @@ async function obtenerAlertasAsistenciaIngenieria(pool, ahoraInput = null) {
     const alertas = [];
 
     for (const persona of ALERTAS_ASISTENCIA_INGENIERIA_TURNO) {
-        const ventana = obtenerVentanaTurno(persona, ahoraMx);
         const ajuste = await obtenerAjusteAsistencia(pool, {
             fecha: ahoraMx.format('YYYY-MM-DD'),
             personaKey: persona.key
         });
+        const personaEfectiva = aplicarAjusteTurnoIngenieria(persona, ajuste);
+        const ventana = obtenerVentanaTurno(personaEfectiva, ahoraMx);
 
         const personaKey = (persona.key || '').toLowerCase();
         const descansoDominical = INGENIERIA_DESCANSO_DOMINGO_KEYS.has(personaKey) && (
@@ -398,8 +422,8 @@ async function obtenerAlertasAsistenciaIngenieria(pool, ahoraInput = null) {
         const severidad = minutosDesdeInicio > ALERTA_ASISTENCIA_FALTA_MIN ? 'FALTA' : 'RETARDO';
 
         const reportoActividad = await existeActividadTurnoIngenieria(pool, {
-            persona,
-            inicio: ventana.inicio,
+            persona: personaEfectiva,
+            inicio: ventana.inicio.clone().subtract(ALERTA_ASISTENCIA_ANTICIPO_MIN, 'minutes'),
             fin: ahoraMx
         });
 
@@ -409,12 +433,12 @@ async function obtenerAlertasAsistenciaIngenieria(pool, ahoraInput = null) {
 
         alertas.push({
             key: persona.key,
-            etiqueta: persona.etiqueta,
-            persona: persona.nombre,
-            turno: persona.turno,
-            turnoInicio: persona.turnoInicio,
-            turnoFin: persona.turnoFin,
-            grupo: persona.grupo,
+            etiqueta: personaEfectiva.etiqueta,
+            persona: personaEfectiva.nombre,
+            turno: personaEfectiva.turno,
+            turnoInicio: personaEfectiva.turnoInicio,
+            turnoFin: personaEfectiva.turnoFin,
+            grupo: personaEfectiva.grupo,
             toleranciaMin: ALERTA_ASISTENCIA_TOLERANCIA_MIN,
             faltaMin: ALERTA_ASISTENCIA_FALTA_MIN,
             severidad,

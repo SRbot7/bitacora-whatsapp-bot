@@ -8,6 +8,7 @@
     "backup:run": "bash scripts/backup-daily.sh",
     "backup:setup": "bash scripts/setup-auto-protection.sh",
     "db:restore": "bash scripts/restore-db.sh",
+    "tunnel:start": "node scripts/quick-tunnel.js",
     "job:limpieza:relink": "node utils/relink-limpieza-evidencias.js",
     "job:limpieza:relink:apply": "node utils/relink-limpieza-evidencias.js --apply"
   },

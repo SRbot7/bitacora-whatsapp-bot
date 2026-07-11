@@ -12,6 +12,7 @@ const state = {
 };
 
 const DASHBOARD_KEY_QUERY_PARAM = 'key';
+const DASHBOARD_KEY_QUERY_PARAM_LEGACY = 'k';
 const DASHBOARD_KEY_STORAGE = 'dashboardPrivateKey';
 
 const els = {
@@ -53,7 +54,9 @@ const els = {
 
 function getDashboardKeyFromUrl() {
     const params = new URLSearchParams(window.location.search || '');
-    return (params.get(DASHBOARD_KEY_QUERY_PARAM) || '').trim();
+    return (params.get(DASHBOARD_KEY_QUERY_PARAM)
+        || params.get(DASHBOARD_KEY_QUERY_PARAM_LEGACY)
+        || '').trim();
 }
 
 function persistDashboardKey(key = '') {

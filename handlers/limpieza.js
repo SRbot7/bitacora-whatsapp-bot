@@ -6,7 +6,10 @@ const {
     obtenerUltimaActividadLimpiezaSinReportePorAutor
 } = require('../services/limpieza');
 const { resolverPersonaMarcador } = require('../services/limpieza-personal');
-const { registrarAsistenciaLimpieza } = require('../services/asistencia-limpieza');
+const {
+    resolverRolYPersonaLimpieza,
+    registrarPersonaLimpiezaSiNoExiste
+} = require('../services/limpieza-roles');
 const { ultimasLimpiezas, claveMemoria } = require('../lib/memoria');
 const { logPersistencia } = require('../lib/persistence-log');
 
@@ -29,23 +32,23 @@ const LIMPIEZA_PLACEHOLDER_WINDOW_MINUTES = Math.max(
 async function manejarLimpieza({ message, chat, textoOriginal, nombreAutor, fecha }) {
 
     const personaPermitida = resolverPersonaMarcador(nombreAutor);
-    if (!personaPermitida) {
-        console.log('⏭️ LIMPIEZA ignorada: autor fuera del personal permitido =>', nombreAutor);
-        return;
-    }
-
-    const autorCanonico = personaPermitida.nombre;
+    const personaRolActual = resolverRolYPersonaLimpieza(nombreAutor)
+        || registrarPersonaLimpiezaSiNoExiste(nombreAutor)
+        || { nombre: (nombreAutor || 'Sin nombre'), rol: 'SIN_CLASIFICAR' };
+    const autorCanonico = personaPermitida?.nombre || personaRolActual.nombre;
 
     console.log('\n🧹 LIMPIEZA');
     console.log('Descripción:', textoOriginal);
+    console.log('Rol catalogado:', personaRolActual.rol || 'SIN_CLASIFICAR');
+    if (!personaPermitida) {
+        console.log('ℹ️ LIMPIEZA autor sin catalogar, se registra como:', autorCanonico);
+    }
 
     const fechaArchivo  = fecha.format('YYYY-MM-DD');
     let rutaEvidencia   = '';
     let actividadId     = null;
     let evidenciaRelacionada = false;
     const descripcion   = (textoOriginal || '').trim();
-    const huboReporte   = Boolean(descripcion);
-    const huboEvidencia = Boolean(message.hasMedia);
     const clave         = claveMemoria(chat.name, message.author);
 
     // =========================
@@ -188,25 +191,6 @@ async function manejarLimpieza({ message, chat, textoOriginal, nombreAutor, fech
         } else {
             console.log('⚠️ Evidencia sin actividad de limpieza previa (enviar primero mensaje con texto).');
         }
-    }
-
-    const idAsistencia = await registrarAsistenciaLimpieza({
-        fecha,
-        autor: autorCanonico,
-        grupo: chat.name,
-        fuenteRegistro: 'AUTOMATICO',
-        reportesIncremento: huboReporte ? 1 : 0,
-        evidenciasIncremento: huboEvidencia ? 1 : 0
-    });
-
-    if (idAsistencia) {
-        logPersistencia({
-            tabla: 'asistencia_limpieza_diaria',
-            id: idAsistencia,
-            autor: autorCanonico,
-            grupo: chat.name,
-            mensajeId: message.id._serialized
-        });
     }
 
 }

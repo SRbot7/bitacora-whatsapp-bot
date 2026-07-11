@@ -1,6 +1,9 @@
 const moment = require('moment-timezone');
 const pool = require('../db');
-const { obtenerFechaOperativaTurno } = require('./asistencia-limpieza');
+const {
+    obtenerFechaOperativaTurno,
+    consolidarAsistenciaLimpiezaDiariaDesdeEventos
+} = require('./asistencia-limpieza');
 const {
     MARCADOR_PERSONAL,
     normalizarTexto,
@@ -10,8 +13,13 @@ const {
     resolverPersonaMarcador
 } = require('./limpieza-personal');
 
-const GRUPO_LIMPIEZA = 'MELI SVC PACHUCA - BATIA LIMPIEZA';
-const GRUPO_MANTENIMIENTO = 'Asistencia SHP1 Pachuca';
+const GRUPO_LIMPIEZA = process.env.LIMPIEZA_GROUP_NAME || 'MELI SVC PACHUCA - BATIA LIMPIEZA';
+const GRUPO_LIMPIEZA_ASISTENCIA = process.env.LIMPIEZA_ASISTENCIA_GROUP_NAME || 'Asistencia limpieza SHP1 Pachuca';
+const GRUPO_MANTENIMIENTO = process.env.MANTENIMIENTO_ASISTENCIA_GROUP_NAME || 'Asistencia SHP1 Pachuca';
+const GRUPOS_LIMPIEZA_CON_REGISTRO = Array.from(new Set([
+    GRUPO_LIMPIEZA,
+    GRUPO_LIMPIEZA_ASISTENCIA
+]));
 const ASISTENCIA_RETARDO_MINUTOS = Math.max(
     1,
     Number.parseInt(process.env.ASISTENCIA_RETARDO_MINUTOS || '60', 10) || 60
@@ -140,7 +148,7 @@ async function obtenerAjusteLimpieza(poolRef, { fecha, personaKey }) {
     try {
         const res = await poolRef.query(
             `
-            SELECT tipo
+                        SELECT tipo, turno, motivo
             FROM asistencia_limpieza_ajustes
             WHERE fecha = $1
               AND persona_key = $2
@@ -157,6 +165,21 @@ async function obtenerAjusteLimpieza(poolRef, { fecha, personaKey }) {
 
         throw error;
     }
+}
+
+function resolverTurnoMttoConAjuste(persona = {}, ajuste = null) {
+    const turnoBase = persona?.turno || 'Sin turno';
+    const turnoAjuste = String(ajuste?.turno || '').trim();
+    if (ajuste?.tipo !== 'CAMBIO_TURNO' || !turnoAjuste) {
+        return turnoBase;
+    }
+
+    const horario = extraerHorarioTurno(turnoAjuste);
+    if (!horario) {
+        return turnoBase;
+    }
+
+    return `Ajuste ${turnoAjuste}`;
 }
 
 function resolverEstadoLimpieza(persona, ahoraMx, tieneRegistro, ajuste) {
@@ -298,6 +321,9 @@ function resolverEstadoMantenimiento(persona, ahoraMx, tieneRegistro, ajuste) {
 async function sincronizarEstadosAsistencia(poolRef = pool, ahoraInput = null) {
     await asegurarTablaEstadoAsistencia();
 
+    // Mantener tabla diaria alineada con eventos para evitar huecos entre flujo de captura y dashboard.
+    await consolidarAsistenciaLimpiezaDiariaDesdeEventos();
+
     const ahoraMx = ahoraInput
         ? moment(ahoraInput).tz('America/Mexico_City')
         : moment().tz('America/Mexico_City');
@@ -312,12 +338,12 @@ async function sincronizarEstadosAsistencia(poolRef = pool, ahoraInput = null) {
             SELECT autor, total_reportes, total_evidencias, fecha
             FROM asistencia_limpieza_diaria
             WHERE fecha = $1
-                            AND grupo = $2
+              AND grupo = ANY($2::text[])
             ORDER BY fecha ASC
             `,
             [
                 fechaOperativa,
-                GRUPO_LIMPIEZA
+                GRUPOS_LIMPIEZA_CON_REGISTRO
             ]
         );
 
@@ -369,8 +395,17 @@ async function sincronizarEstadosAsistencia(poolRef = pool, ahoraInput = null) {
     }
 
     for (const persona of EQUIPO_MANTENIMIENTO) {
-        const horarioTurno = extraerHorarioTurno(persona.turno || '');
-        const ventana = obtenerVentanaTurno(persona, ahoraMx);
+        const ajuste = await obtenerAjusteLimpieza(poolRef, {
+            fecha: fechaHoy,
+            personaKey: persona.key
+        });
+        const turnoEfectivo = resolverTurnoMttoConAjuste(persona, ajuste);
+        const personaEfectiva = {
+            ...persona,
+            turno: turnoEfectivo
+        };
+        const horarioTurno = extraerHorarioTurno(personaEfectiva.turno || '');
+        const ventana = obtenerVentanaTurno(personaEfectiva, ahoraMx);
         const mantenimientoRowsRes = await poolRef.query(
             `
             SELECT autor, tipo_evento, ubicacion, turno, mensaje_id, fecha
@@ -388,13 +423,10 @@ async function sincronizarEstadosAsistencia(poolRef = pool, ahoraInput = null) {
         );
 
         const estado = resolverEstadoMantenimiento(
-            persona,
+            personaEfectiva,
             ahoraMx,
             mantenimientoRowsRes.rows.some((row) => coincideAutorConPersona(row.autor || '', persona)),
-            await obtenerAjusteLimpieza(poolRef, {
-                fecha: fechaHoy,
-                personaKey: persona.key
-            })
+            ajuste
         );
         const horario = horarioTurno ? `${horarioTurno.turnoInicio}-${horarioTurno.turnoFin}` : 'Sin horario';
 
@@ -419,7 +451,7 @@ async function sincronizarEstadosAsistencia(poolRef = pool, ahoraInput = null) {
                 GRUPO_MANTENIMIENTO,
                 persona.key,
                 persona.nombre,
-                persona.turno,
+                personaEfectiva.turno,
                 horario,
                 estado.estadoTurno,
                 estado.detalleTurno,

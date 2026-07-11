@@ -199,7 +199,51 @@ async function registrarAsistenciaMantenimiento({
     return resultado.rows[0]?.id || null;
 }
 
+async function actualizarUbicacionUltimoEventoMantenimiento({
+    fecha,
+    autor,
+    grupo,
+    tipoEvento,
+    ubicacion,
+    mensajeOriginal
+}) {
+    await asegurarTablaAsistenciaMantenimiento();
+
+    const resultado = await pool.query(
+        `
+        UPDATE asistencia_mantenimiento_eventos
+        SET
+            ubicacion = $1,
+            mensaje_original = $2,
+            updated_at = NOW()
+        WHERE id = (
+            SELECT id
+            FROM asistencia_mantenimiento_eventos
+            WHERE autor = $3
+              AND trim(grupo) = trim($4)
+              AND tipo_evento = $5
+              AND evento_at >= ($6::timestamp - INTERVAL '15 minutes')
+              AND evento_at <= $6::timestamp
+            ORDER BY evento_at DESC
+            LIMIT 1
+        )
+        RETURNING id
+        `,
+        [
+            ubicacion || 'Sin ubicacion',
+            mensajeOriginal || '',
+            autor || 'Sin nombre',
+            (grupo || 'Sin grupo').trim(),
+            (tipoEvento || 'ENTRADA').toUpperCase(),
+            fecha.format('YYYY-MM-DD HH:mm:ss')
+        ]
+    );
+
+    return resultado.rows[0]?.id || null;
+}
+
 module.exports = {
     asegurarTablaAsistenciaMantenimiento,
-    registrarAsistenciaMantenimiento
+    registrarAsistenciaMantenimiento,
+    actualizarUbicacionUltimoEventoMantenimiento
 };

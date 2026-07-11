@@ -21,3 +21,4 @@ backup.sql
 logs/
 
 *.log
+runtime/

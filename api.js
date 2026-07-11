@@ -1,5 +1,8 @@
 require('dotenv').config();
 
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const pool = require('./db');
@@ -49,7 +52,8 @@ const LIMPIEZA_GROUP_WINDOW_MINUTES = Math.max(
 const LIMPIEZA_PERSONA_KEYS = MARCADOR_PERSONAL.map((persona) => persona.key);
 const LIMPIEZA_NOMBRES_CANONICOS = MARCADOR_PERSONAL.map((persona) => persona.nombre);
 
-const GRUPO_ASISTENCIA_INGENIERIA = 'Asistencia SHP1 Pachuca';
+const GRUPO_ASISTENCIA_INGENIERIA = process.env.MANTENIMIENTO_ASISTENCIA_GROUP_NAME || 'Asistencia SHP1 Pachuca';
+const BITACORA_GROUP_NAME = process.env.BITACORA_GROUP_NAME || 'BITACORA-MTTO-SHP1';
 const ASISTENCIA_RETARDO_MINUTOS = Math.max(
     1,
     Number.parseInt(process.env.ASISTENCIA_RETARDO_MINUTOS || '60', 10) || 60
@@ -91,11 +95,114 @@ app.use('/evidencias_bitacora', express.static('evidencias_bitacora'));
 app.use('/evidencias', express.static('evidencias_bitacora'));
 app.use('/evidencias_limpieza', express.static('evidencias_limpieza'));
 
+const RUTAS_ASISTENCIA_LEGACY = new Set([
+    '/api/v1/limpieza/asistencia',
+    '/api/v1/limpieza/asistencia-semanal',
+    '/api/v1/limpieza/asistencia-mensual',
+    '/api/v1/limpieza/asistencia-marcador',
+    '/api/v1/limpieza/asistencia-ajustes',
+    '/api/v1/ingenieria/asistencia-hoy',
+    '/api/v1/ingenieria/asistencia-semanal',
+    '/api/v1/ingenieria/asistencia-mensual',
+    '/api/v1/ingenieria/asistencia-marcador',
+    '/api/v1/asistencia/estado-hoy',
+    '/api/v1/supervisor/asistencia-alertas'
+]);
+
+function responderLegacyAsistenciaDesactivada(res) {
+    return res.status(410).json({
+        ok: false,
+        error: 'Asistencia legacy desactivada.',
+        message: 'El flujo anterior de asistencia fue retirado. Usa el nuevo flujo unificado de asistencia_eventos.'
+    });
+}
+
+app.use((req, res, next) => {
+    const basePath = req.path || '';
+    if (
+        RUTAS_ASISTENCIA_LEGACY.has(basePath) ||
+        basePath.startsWith('/api/v1/limpieza/asistencia-ajustes/')
+    ) {
+        return responderLegacyAsistenciaDesactivada(res);
+    }
+    return next();
+});
+
 // =========================
 // SEGURIDAD REMOTA (TAILSCALE)
 // =========================
 
 const PRIVATE_KEY = process.env.DASHBOARD_PRIVATE_KEY || '';
+const DASHBOARD_AUTH_COOKIE = 'dashboard_key';
+const DASHBOARD_SHARE_TOKEN_FILE = process.env.DASHBOARD_SHARE_TOKEN_FILE || path.join(__dirname, 'runtime', 'dashboard-share-token.txt');
+const DASHBOARD_SHARE_TOKEN_ROTATE_MINUTES = Math.max(
+    5,
+    Number.parseInt(process.env.DASHBOARD_SHARE_TOKEN_ROTATE_MINUTES || '720', 10) || 720
+);
+
+let dashboardShareToken = (process.env.DASHBOARD_SHARE_TOKEN || '').trim();
+let dashboardShareTokenPrev = '';
+
+function cargarTokenCompartidoPersistido() {
+    try {
+        if (!fs.existsSync(DASHBOARD_SHARE_TOKEN_FILE)) {
+            return '';
+        }
+
+        return fs.readFileSync(DASHBOARD_SHARE_TOKEN_FILE, 'utf8').trim();
+    } catch (error) {
+        console.error('⚠️ No se pudo leer dashboard share token persistido:', error?.message || error);
+        return '';
+    }
+}
+
+function generarTokenCompartido() {
+    return crypto.randomBytes(24).toString('hex');
+}
+
+function persistirTokenCompartido(token = '') {
+    try {
+        if (!token) {
+            return;
+        }
+
+        fs.mkdirSync(path.dirname(DASHBOARD_SHARE_TOKEN_FILE), { recursive: true });
+        fs.writeFileSync(DASHBOARD_SHARE_TOKEN_FILE, `${token}\n`, 'utf8');
+    } catch (error) {
+        console.error('⚠️ No se pudo persistir dashboard share token:', error?.message || error);
+    }
+}
+
+function getTokensValidosDashboard() {
+    const tokens = new Set();
+    if (PRIVATE_KEY) {
+        tokens.add(PRIVATE_KEY);
+    }
+    if (dashboardShareToken) {
+        tokens.add(dashboardShareToken);
+    }
+    if (dashboardShareTokenPrev) {
+        tokens.add(dashboardShareTokenPrev);
+    }
+    return tokens;
+}
+
+if (!dashboardShareToken) {
+    dashboardShareToken = cargarTokenCompartidoPersistido();
+}
+
+if (!dashboardShareToken) {
+    dashboardShareToken = generarTokenCompartido();
+}
+
+persistirTokenCompartido(dashboardShareToken);
+
+setInterval(() => {
+    dashboardShareTokenPrev = dashboardShareToken;
+    dashboardShareToken = generarTokenCompartido();
+    persistirTokenCompartido(dashboardShareToken);
+    console.log('🔐 Dashboard share token rotado.');
+}, DASHBOARD_SHARE_TOKEN_ROTATE_MINUTES * 60 * 1000);
 
 function esTailscaleIp(ip = '') {
     return ip.startsWith('100.') || ip.startsWith('fd7a:115c:a1e0:');
@@ -107,6 +214,28 @@ function getClientIp(req) {
     return ipRaw.replace('::ffff:', '');
 }
 
+function parseCookies(cookieHeader = '') {
+    return cookieHeader
+        .split(';')
+        .map((chunk) => chunk.trim())
+        .filter(Boolean)
+        .reduce((acc, pair) => {
+            const idx = pair.indexOf('=');
+            if (idx <= 0) {
+                return acc;
+            }
+
+            const key = pair.slice(0, idx).trim();
+            const value = decodeURIComponent(pair.slice(idx + 1).trim());
+            acc[key] = value;
+            return acc;
+        }, {});
+}
+
+function getDashboardQueryKey(req) {
+    return (req.query?.k || req.query?.key || '').toString();
+}
+
 function accesoPermitido(req) {
     const ip = getClientIp(req);
 
@@ -114,15 +243,32 @@ function accesoPermitido(req) {
         return true;
     }
 
-    if (!PRIVATE_KEY) {
+    const tokensValidos = getTokensValidosDashboard();
+    if (tokensValidos.size === 0) {
         return false;
     }
 
     const keyHeader = req.headers['x-dashboard-key'];
-    return keyHeader && keyHeader === PRIVATE_KEY;
+    const keyQuery = getDashboardQueryKey(req);
+    const cookies = parseCookies(req.headers.cookie || '');
+    const keyCookie = (cookies[DASHBOARD_AUTH_COOKIE] || '').toString();
+
+    return (keyHeader && tokensValidos.has(keyHeader))
+        || (keyQuery && tokensValidos.has(keyQuery))
+        || (keyCookie && tokensValidos.has(keyCookie));
 }
 
 app.use((req, res, next) => {
+    const keyQuery = getDashboardQueryKey(req);
+    const tokensValidos = getTokensValidosDashboard();
+    if (keyQuery && tokensValidos.has(keyQuery)) {
+        res.cookie(DASHBOARD_AUTH_COOKIE, keyQuery, {
+            httpOnly: true,
+            sameSite: 'lax',
+            maxAge: 1000 * 60 * 60 * 24 * 7
+        });
+    }
+
     if (req.path === '/') {
         return next();
     }
@@ -690,7 +836,7 @@ app.get('/', (req, res) => {
 app.get('/api/v1/summary', async (req, res) => {
     try {
         const [bitacora, limpieza, pendientes, preventivos, proyectos] = await Promise.all([
-            pool.query(`SELECT COUNT(*)::int AS total FROM bitacora WHERE grupo = 'BITACORA-MTTO-SHP1'`),
+            pool.query(`SELECT COUNT(*)::int AS total FROM bitacora WHERE grupo = '${BITACORA_GROUP_NAME}'`),
             pool.query(`
                 SELECT COUNT(*)::int AS total
                 FROM actividades_limpieza
@@ -725,7 +871,7 @@ app.get('/api/v1/bitacora/actividades', async (req, res) => {
         const { page, pageSize, offset } = getPagination(req);
         const { from, to, search, area, tecnico, turno } = req.query;
 
-        const where = [`grupo = 'BITACORA-MTTO-SHP1'`];
+        const where = [`grupo = '${BITACORA_GROUP_NAME}'`];
         const params = [];
         let idx = 1;
 
@@ -783,7 +929,7 @@ app.get('/api/v1/bitacora/actividades/:id/evidencias', async (req, res) => {
             FROM evidencias_mtto e
                         JOIN bitacora a ON a.id = e.actividad_id
             WHERE e.actividad_id = $1
-              AND a.grupo = 'BITACORA-MTTO-SHP1'
+                            AND a.grupo = '${BITACORA_GROUP_NAME}'
             ORDER BY e.fecha ASC, e.id ASC
             `,
             [id]
@@ -2016,7 +2162,7 @@ app.get('/actividades', async (req, res) => {
             `
             SELECT *
             FROM bitacora
-            WHERE grupo = 'BITACORA-MTTO-SHP1'
+            WHERE grupo = '${BITACORA_GROUP_NAME}'
             ORDER BY fecha DESC
             LIMIT 100
             `
@@ -2037,7 +2183,7 @@ app.get('/actividad/:id', async (req, res) => {
             SELECT *
                         FROM bitacora
             WHERE id = $1
-              AND grupo = 'BITACORA-MTTO-SHP1'
+                            AND grupo = '${BITACORA_GROUP_NAME}'
             `,
             [id]
         );

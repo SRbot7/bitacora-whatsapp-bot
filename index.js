@@ -1,5 +1,7 @@
 require('dotenv').config();
 
+const fs = require('fs');
+const path = require('path');
 const moment = require('moment-timezone');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
@@ -9,19 +11,19 @@ const { obtenerTextoMensaje } = require('./lib/bitacora-parser');
 const { manejarSupervisor }   = require('./handlers/supervisor');
 const { manejarBitacora }     = require('./handlers/bitacora');
 const { manejarLimpieza }     = require('./handlers/limpieza');
-const { manejarMantenimiento } = require('./handlers/mantenimiento');
+const { manejarAsistencia } = require('./handlers/asistencia');
 const { manejarPreventivos }   = require('./handlers/preventivos');
-const {
-    obtenerAlertasAsistenciaLimpieza,
-    obtenerAlertasAsistenciaIngenieria
-} = require('./services/alertas-asistencia');
 const {
     obtenerResumenOperativo,
     construirMensajeResumenOperativo
 } = require('./services/reportes');
-const {
-    sincronizarEstadosAsistencia
-} = require('./services/estado-asistencia');
+
+const BITACORA_GROUP_NAME = process.env.BITACORA_GROUP_NAME || 'BITACORA-MTTO-SHP1';
+const SUPERVISOR_GROUP_NAME = process.env.SUPERVISOR_GROUP_NAME || 'Centro Operativo SHP1';
+const LIMPIEZA_GROUP_NAME = process.env.LIMPIEZA_GROUP_NAME || 'MELI SVC PACHUCA - BATIA LIMPIEZA';
+const LIMPIEZA_ASISTENCIA_GROUP_NAME = process.env.LIMPIEZA_ASISTENCIA_GROUP_NAME || 'Asistencia limpieza SHP1 Pachuca';
+const MANTENIMIENTO_ASISTENCIA_GROUP_NAME = process.env.MANTENIMIENTO_ASISTENCIA_GROUP_NAME || 'Asistencia SHP1 Pachuca';
+const MANTENIMIENTO_BLOQUEADO_GROUP_NAME = process.env.MANTENIMIENTO_BLOQUEADO_GROUP_NAME || 'Mantenimiento SHP1';
 
 function normalizarNombreGrupo(nombre = '') {
     return nombre
@@ -48,47 +50,80 @@ function obtenerFechaMensajeMx(message) {
 // GRUPOS ACEPTADOS
 // =========================
 
+// Mapa principal de escucha: cada grupo entra por un flujo especifico.
 const GRUPOS = {
-    [normalizarNombreGrupo('BITACORA-MTTO-SHP1')]:                'BITACORA',
-    [normalizarNombreGrupo('Centro Operativo SHP1')]:             'SUPERVISOR',
-    [normalizarNombreGrupo('MELI SVC PACHUCA - BATIA LIMPIEZA')]: 'LIMPIEZA',
-    [normalizarNombreGrupo('Asistencia SHP1 Pachuca')]:           'MANTENIMIENTO_ASISTENCIA'
+    [normalizarNombreGrupo(BITACORA_GROUP_NAME)]:                 'BITACORA',
+    [normalizarNombreGrupo(SUPERVISOR_GROUP_NAME)]:               'SUPERVISOR',
+    [normalizarNombreGrupo(LIMPIEZA_GROUP_NAME)]:                 'LIMPIEZA',
+    [normalizarNombreGrupo(LIMPIEZA_ASISTENCIA_GROUP_NAME)]:      'ASISTENCIA_LIMPIEZA',
+    [normalizarNombreGrupo(MANTENIMIENTO_ASISTENCIA_GROUP_NAME)]: 'ASISTENCIA_MTTO'
 };
 
 const GRUPOS_BLOQUEADOS = new Set([
-    normalizarNombreGrupo('Mantenimiento SHP1')
+    normalizarNombreGrupo(MANTENIMIENTO_BLOQUEADO_GROUP_NAME)
 ]);
 
 const HORARIOS_REPORTE = ['06:30', '15:30', '22:30'];
 const COMANDOS_REPORTE = ['REPORTE', 'RESUMEN', 'REPORTE OPERATIVO', 'RESUMEN OPERATIVO'];
 const AUTO_REPORTES_ACTIVOS = (process.env.AUTO_REPORTES_ACTIVOS || 'false').toLowerCase() === 'true';
-const ALERTAS_ASISTENCIA_ACTIVAS = (process.env.ALERTAS_ASISTENCIA_ACTIVAS || 'true').toLowerCase() === 'true';
-const ESTADOS_ASISTENCIA_SYNC_MINUTES = Math.max(1, Number.parseInt(process.env.ESTADOS_ASISTENCIA_SYNC_MINUTES || '5', 10) || 5);
-const GRUPO_ALERTAS_SUPERVISOR = 'Centro Operativo SHP1';
+const GRUPO_ALERTAS_SUPERVISOR = SUPERVISOR_GROUP_NAME;
 const MODO_SOLO_LECTURA_GRUPOS = true;
+// Solo estos grupos pueden recibir mensajes salientes del bot.
 const GRUPOS_SALIDA_HABILITADA = new Set([
-    normalizarNombreGrupo('BITACORA-MTTO-SHP1'),
-    normalizarNombreGrupo('Centro Operativo SHP1')
+    normalizarNombreGrupo(BITACORA_GROUP_NAME),
+    normalizarNombreGrupo(SUPERVISOR_GROUP_NAME),
+    normalizarNombreGrupo(LIMPIEZA_ASISTENCIA_GROUP_NAME)
 ]);
 const COMANDOS_CONTROL_BOT = new Set([
     'BOT STOP', 'BOT PAUSA',
     'BOT START', 'BOT REANUDAR',
     'BOT RESET',
-    'BOT STATUS', 'BOT ESTADO'
+    'BOT STATUS', 'BOT ESTADO',
+    'BOT URL', 'BOT REENVIAR URL', 'BOT URL ESTADO'
 ]);
 const VENTANA_PREVENTIVO_CO_MS = Math.max(
     60 * 1000,
     Number.parseInt(process.env.PREVENTIVO_CO_VENTANA_MS || `${3 * 60 * 1000}`, 10) || (3 * 60 * 1000)
 );
+const WA_LAUNCH_TIMEOUT_MS = Math.max(
+    30_000,
+    Number.parseInt(process.env.WA_LAUNCH_TIMEOUT_MS || '120000', 10) || 120_000
+);
+const WA_PROTOCOL_TIMEOUT_MS = Math.max(
+    30_000,
+    Number.parseInt(process.env.WA_PROTOCOL_TIMEOUT_MS || '180000', 10) || 180_000
+);
+const WA_INIT_RETRY_DELAY_MS = Math.max(
+    5_000,
+    Number.parseInt(process.env.WA_INIT_RETRY_DELAY_MS || '20000', 10) || 20_000
+);
+const QUICK_TUNNEL_URL_FILE = process.env.QUICK_TUNNEL_URL_FILE || path.join(__dirname, 'runtime', 'quick-tunnel-url.txt');
+const DASHBOARD_SHARE_TOKEN_FILE = process.env.DASHBOARD_SHARE_TOKEN_FILE || path.join(__dirname, 'runtime', 'dashboard-share-token.txt');
+const DASHBOARD_SHARE_TOKEN_ROTATE_MINUTES = Math.max(
+    5,
+    Number.parseInt(process.env.DASHBOARD_SHARE_TOKEN_ROTATE_MINUTES || '720', 10) || 720
+);
+const QUICK_TUNNEL_SYNC_SECONDS = Math.max(
+    15,
+    Number.parseInt(process.env.QUICK_TUNNEL_SYNC_SECONDS || '45', 10) || 45
+);
 
 let schedulerReportesId = null;
-let schedulerEstadosAsistenciaId = null;
+let schedulerQuickTunnelId = null;
 const reporteEnviadoHoy = {};
-const alertaAsistenciaEnviada = {};
 const pendientesPreventivoCO = {};
+let chatSupervisorCache = null;
+let ultimoErrorChatSupervisorMs = 0;
 let botPausado = false;
 let botPausadoAt = null;
 let botPausadoPor = '';
+let quickTunnelUrlPublicada = '';
+let quickTunnelUltimaPublicacionMx = '';
+
+function esErrorTransitorioPuppeteer(err) {
+    const detalle = `${err?.message || ''}\n${err?.stack || ''}`;
+    return /Runtime\.callFunctionOn|Promise was collected|Execution context was destroyed|Protocol error|Target closed/i.test(detalle);
+}
 
 function normalizarComando(texto = '') {
     return texto
@@ -173,7 +208,7 @@ function esEntradaOperativaSupervisorDesdePropio(texto = '') {
         'ASISTENCIA', 'EN SITIO',
         'ASISTENCIA HOY', 'EN TURNO',
         'MARCADOR', 'MARCADOR ASISTENCIA', 'RESUMEN ASISTENCIA',
-        'BOT STOP', 'BOT PAUSA', 'BOT START', 'BOT REANUDAR', 'BOT RESET', 'BOT STATUS', 'BOT ESTADO',
+        'BOT STOP', 'BOT PAUSA', 'BOT START', 'BOT REANUDAR', 'BOT RESET', 'BOT STATUS', 'BOT ESTADO', 'BOT URL', 'BOT REENVIAR URL',
         'AYUDA', 'AYUDA GUIADA', 'GUIA AYUDA', 'AYUDA RAPIDA',
         'LISTAR', 'ABIERTOS', 'CERRADOS',
         'PREVENTIVOS', 'ALERTAS', 'ALERTAS ASISTENCIA',
@@ -194,6 +229,14 @@ function esEntradaOperativaSupervisorDesdePropio(texto = '') {
     }
 
     if (/^HISTORIAL\s+CO\s+AUTOR\s*:/i.test(texto)) {
+        return true;
+    }
+
+    if (/^ROLES\s+LIMPIEZA(?:\s+PENDIENTES)?$/i.test(texto)) {
+        return true;
+    }
+
+    if (/^ROL\s+LIMPIEZA\s*:\s*.+\|\s*(LIMPIEZA|SITE[_\s-]?LEADER|TEAM[_\s-]?LEADER|SIN[_\s-]?CLASIFICAR)\s*$/i.test(texto)) {
         return true;
     }
 
@@ -219,6 +262,130 @@ function limpiarMapeo(obj) {
     Object.keys(obj).forEach((key) => {
         delete obj[key];
     });
+}
+
+function leerQuickTunnelUrl() {
+    try {
+        if (!fs.existsSync(QUICK_TUNNEL_URL_FILE)) {
+            return '';
+        }
+
+        const raw = fs.readFileSync(QUICK_TUNNEL_URL_FILE, 'utf8').trim();
+        if (!raw) {
+            return '';
+        }
+
+        const match = raw.match(/https:\/\/[-a-zA-Z0-9]+\.trycloudflare\.com/);
+        return match ? match[0] : '';
+    } catch (error) {
+        console.error('⚠️ Error leyendo URL de Quick Tunnel:', error?.message || error);
+        return '';
+    }
+}
+
+function construirUrlDashboardCompartible(urlBase = '') {
+    if (!urlBase) {
+        return '';
+    }
+
+    let tokenCompartible = '';
+    try {
+        if (fs.existsSync(DASHBOARD_SHARE_TOKEN_FILE)) {
+            tokenCompartible = fs.readFileSync(DASHBOARD_SHARE_TOKEN_FILE, 'utf8').trim();
+        }
+    } catch (error) {
+        console.error('⚠️ Error leyendo dashboard share token:', error?.message || error);
+    }
+
+    if (!tokenCompartible) {
+        tokenCompartible = (process.env.DASHBOARD_PRIVATE_KEY || '').trim();
+    }
+
+    if (!tokenCompartible) {
+        return urlBase;
+    }
+
+    const separador = urlBase.includes('?') ? '&' : '?';
+    return `${urlBase}${separador}k=${encodeURIComponent(tokenCompartible)}`;
+}
+
+function formatearMinutosRestantes(minutos = 0) {
+    if (minutos <= 0) {
+        return '0 min';
+    }
+
+    const horas = Math.floor(minutos / 60);
+    const mins = minutos % 60;
+    if (horas <= 0) {
+        return `${mins} min`;
+    }
+
+    return `${horas}h ${mins}m`;
+}
+
+function obtenerEstadoQuickTunnel() {
+    const urlBase = leerQuickTunnelUrl();
+    const urlCompartible = construirUrlDashboardCompartible(urlBase);
+
+    let tokenActualizadoMx = '-';
+    let tokenRestanteMin = null;
+
+    try {
+        if (fs.existsSync(DASHBOARD_SHARE_TOKEN_FILE)) {
+            const stat = fs.statSync(DASHBOARD_SHARE_TOKEN_FILE);
+            const actualizado = moment(stat.mtimeMs).tz('America/Mexico_City');
+            tokenActualizadoMx = actualizado.format('YYYY-MM-DD HH:mm:ss');
+
+            const transcurridoMin = Math.max(0, Math.floor((Date.now() - stat.mtimeMs) / 60000));
+            tokenRestanteMin = Math.max(0, DASHBOARD_SHARE_TOKEN_ROTATE_MINUTES - transcurridoMin);
+        }
+    } catch (error) {
+        console.error('⚠️ Error calculando estado de rotacion de token:', error?.message || error);
+    }
+
+    return {
+        urlBase,
+        urlCompartible,
+        ultimaPublicacion: quickTunnelUltimaPublicacionMx || '-',
+        tokenActualizadoMx,
+        tokenRestanteMin
+    };
+}
+
+async function revisarQuickTunnelUrl({ clientRef, forzar = false }) {
+    if (botPausado && !forzar) {
+        return false;
+    }
+
+    const urlBase = leerQuickTunnelUrl();
+    if (!urlBase) {
+        return false;
+    }
+
+    const urlCompartible = construirUrlDashboardCompartible(urlBase);
+    if (!forzar && urlCompartible === quickTunnelUrlPublicada) {
+        return false;
+    }
+
+    const chatSupervisor = await obtenerChatSupervisor(clientRef);
+    if (!chatSupervisor) {
+        console.log('⚠️ No se encontro Centro Operativo para publicar URL de Quick Tunnel.');
+        return false;
+    }
+
+    const sello = moment().tz('America/Mexico_City').format('YYYY-MM-DD HH:mm:ss');
+    const mensaje = [
+        '🌐 DASHBOARD PUBLICO (Quick Tunnel)',
+        `URL: ${urlCompartible}`,
+        `Actualizado: ${sello}`,
+        'Nota: URL temporal; puede cambiar si reinicia el proceso del tunel.'
+    ].join('\n');
+
+    await chatSupervisor.sendMessage(mensaje);
+    quickTunnelUrlPublicada = urlCompartible;
+    quickTunnelUltimaPublicacionMx = sello;
+    console.log('🌐 URL Quick Tunnel publicada en Centro Operativo:', urlCompartible);
+    return true;
 }
 
 async function manejarComandoControlBot({ comando, chat, nombreAutor, clientRef }) {
@@ -257,12 +424,11 @@ async function manejarComandoControlBot({ comando, chat, nombreAutor, clientRef 
     }
 
     if (comando === 'BOT RESET') {
-        limpiarMapeo(alertaAsistenciaEnviada);
         limpiarMapeo(reporteEnviadoHoy);
         botPausado = false;
 
         iniciarSchedulerReportes(clientRef);
-        iniciarSchedulerEstadosAsistencia();
+        iniciarSchedulerQuickTunnel(clientRef);
 
         await chat.sendMessage(
             [
@@ -282,13 +448,47 @@ async function manejarComandoControlBot({ comando, chat, nombreAutor, clientRef 
                 `Pausado: ${botPausado ? 'SI' : 'NO'}`,
                 `Pausado por: ${botPausadoPor || '-'}`,
                 `Pausado desde: ${botPausadoAt || '-'}`,
-                `Alertas activas: ${ALERTAS_ASISTENCIA_ACTIVAS ? 'SI' : 'NO'}`,
-                `Sync asistencia (min): ${ESTADOS_ASISTENCIA_SYNC_MINUTES}`,
+                `Quick Tunnel: ${construirUrlDashboardCompartible(leerQuickTunnelUrl()) || 'No disponible'}`,
                 '',
                 'Comandos:',
-                '• BOT STOP',
-                '• BOT START',
-                '• BOT RESET'
+                '• BOT STOP / BOT PAUSA',
+                '• BOT START / BOT REANUDAR',
+                '• BOT RESET',
+                '• BOT URL',
+                '• BOT URL ESTADO'
+            ].join('\n')
+        );
+        return true;
+    }
+
+    if (comando === 'BOT URL' || comando === 'BOT REENVIAR URL') {
+        const publicada = await revisarQuickTunnelUrl({ clientRef, forzar: true });
+        await chat.sendMessage(
+            publicada
+                ? [
+                    '🌐 URL DE DASHBOARD REENVIADA',
+                    `Solicitó: ${nombreAutor || 'Sin nombre'}`,
+                    `Fecha: ${nowMx}`
+                ].join('\n')
+                : [
+                    '⚠️ No hay URL activa de Quick Tunnel.',
+                    'Revisa proceso: pm2 status | grep bitacora-quick-tunnel'
+                ].join('\n')
+        );
+        return true;
+    }
+
+    if (comando === 'BOT URL ESTADO') {
+        const estado = obtenerEstadoQuickTunnel();
+        await chat.sendMessage(
+            [
+                '🌐 ESTADO QUICK TUNNEL',
+                `URL base: ${estado.urlBase || 'No disponible'}`,
+                `URL compartible: ${estado.urlCompartible || 'No disponible'}`,
+                `Ultima publicacion CO: ${estado.ultimaPublicacion}`,
+                `Token actualizado: ${estado.tokenActualizadoMx}`,
+                `Rotacion token (min): ${DASHBOARD_SHARE_TOKEN_ROTATE_MINUTES}`,
+                `Tiempo restante token: ${estado.tokenRestanteMin === null ? '-' : formatearMinutosRestantes(estado.tokenRestanteMin)}`
             ].join('\n')
         );
         return true;
@@ -338,81 +538,38 @@ function esEntradaOperativaMantenimientoDesdePropio(texto = '') {
     );
 }
 
-async function revisarAlertasAsistencia({ clientRef }) {
-    if (!ALERTAS_ASISTENCIA_ACTIVAS) {
-        return;
+async function obtenerChatSupervisor(clientRef) {
+    if (
+        chatSupervisorCache &&
+        chatSupervisorCache.isGroup &&
+        normalizarNombreGrupo(chatSupervisorCache.name) === normalizarNombreGrupo(GRUPO_ALERTAS_SUPERVISOR)
+    ) {
+        return chatSupervisorCache;
     }
 
-    if (botPausado) {
-        return;
-    }
+    try {
+        const chats = await clientRef.getChats();
+        const chatSupervisor = chats.find((chat) => {
+            return chat.isGroup && normalizarNombreGrupo(chat.name) === normalizarNombreGrupo(GRUPO_ALERTAS_SUPERVISOR);
+        }) || null;
 
-    const chatSupervisor = await obtenerChatSupervisor(clientRef);
-
-    if (!chatSupervisor) {
-        return;
-    }
-
-    if (!chatSupervisor.isGroup || chatSupervisor.name !== GRUPO_ALERTAS_SUPERVISOR) {
-        console.log('⏸️ Alertas no enviadas: destino fuera del grupo permitido.');
-        return;
-    }
-
-    const [alertasLimpiezaRes, alertasIngenieriaRes] = await Promise.allSettled([
-        obtenerAlertasAsistenciaLimpieza(pool),
-        obtenerAlertasAsistenciaIngenieria(pool)
-    ]);
-
-    if (alertasLimpiezaRes.status === 'rejected') {
-        console.error('⚠️ Error obteniendo alertas de limpieza:', alertasLimpiezaRes.reason);
-    }
-
-    if (alertasIngenieriaRes.status === 'rejected') {
-        console.error('⚠️ Error obteniendo alertas de ingenieria:', alertasIngenieriaRes.reason);
-    }
-
-    const alertasLimpieza = alertasLimpiezaRes.status === 'fulfilled'
-        ? alertasLimpiezaRes.value
-        : { items: [] };
-    const alertasIngenieria = alertasIngenieriaRes.status === 'fulfilled'
-        ? alertasIngenieriaRes.value
-        : { items: [] };
-
-    const alertas = [
-        ...(alertasLimpieza.items || []),
-        ...(alertasIngenieria.items || [])
-    ];
-
-    for (const alerta of alertas) {
-        const claveAlerta = `${alerta.etiqueta || 'OPERATIVA'}_${alerta.key}_${alerta.enAlertaDesde}`;
-        if (alertaAsistenciaEnviada[claveAlerta]) {
-            continue;
+        if (chatSupervisor) {
+            chatSupervisorCache = chatSupervisor;
         }
 
-        const esIngenieria = (alerta.etiqueta || '').toUpperCase() === 'INGENIERIA';
-        const estatusMsg = esIngenieria
-            ? `Estatus: Sin registro de check-in despues de ${alerta.toleranciaMin} minutos de iniciado el turno. Se considera falta operativa.`
-            : `Estatus: Sin evidencia de actividad despues de ${alerta.toleranciaMin} minutos. Se considera falta operativa.`;
+        return chatSupervisor;
+    } catch (error) {
+        if (esErrorTransitorioPuppeteer(error)) {
+            const ahora = Date.now();
+            if ((ahora - ultimoErrorChatSupervisorMs) > 60_000) {
+                console.warn('⚠️ obtenerChatSupervisor con error transitorio (se omite ciclo):', error?.message || error);
+                ultimoErrorChatSupervisorMs = ahora;
+            }
+            return null;
+        }
 
-        const mensaje = [
-            `🚨 ALERTA ASISTENCIA ${alerta.etiqueta || 'OPERATIVA'}`,
-            `Personal: ${alerta.persona}`,
-            `Turno: ${alerta.turnoInicio} - ${alerta.turnoFin}`,
-            `Grupo esperado: ${alerta.grupo}`,
-            estatusMsg
-        ].join('\n');
-
-        await chatSupervisor.sendMessage(mensaje);
-        alertaAsistenciaEnviada[claveAlerta] = true;
-        console.log('🚨 Alerta de asistencia enviada:', claveAlerta);
+        throw error;
     }
-}
-
-async function obtenerChatSupervisor(clientRef) {
-    const chats = await clientRef.getChats();
-    return chats.find((chat) => {
-        return chat.isGroup && normalizarNombreGrupo(chat.name) === normalizarNombreGrupo(GRUPO_ALERTAS_SUPERVISOR);
-    });
 }
 
 async function enviarResumenOperativo({ clientRef, tipo }) {
@@ -444,46 +601,27 @@ function iniciarSchedulerReportes(clientRef) {
         schedulerReportesId = null;
     }
 
-    if (!ALERTAS_ASISTENCIA_ACTIVAS) {
-        console.log('⏸️ Alertas de asistencia desactivadas (ALERTAS_ASISTENCIA_ACTIVAS=false).');
-        return;
+    if (AUTO_REPORTES_ACTIVOS) {
+        console.log('ℹ️ AUTO_REPORTES_ACTIVOS=true, pero los reportes automáticos están deshabilitados en este modo limpio.');
     }
+}
 
-    console.log('🔔 Alertas de asistencia activas: se notificará solo en Centro Operativo SHP1.');
+function iniciarSchedulerQuickTunnel(clientRef) {
+    if (schedulerQuickTunnelId) {
+        clearInterval(schedulerQuickTunnelId);
+        schedulerQuickTunnelId = null;
+    }
 
     const ejecutar = async () => {
         try {
-            await revisarAlertasAsistencia({ clientRef });
-
-            if (AUTO_REPORTES_ACTIVOS) {
-                console.log('ℹ️ AUTO_REPORTES_ACTIVOS=true, pero los reportes automaticos siguen deshabilitados por política de solo escucha.');
-            }
+            await revisarQuickTunnelUrl({ clientRef });
         } catch (error) {
-            console.error('❌ Error enviando alertas automáticas:', error);
+            console.error('⚠️ Error revisando URL de Quick Tunnel:', error?.message || error);
         }
     };
 
     ejecutar();
-    schedulerReportesId = setInterval(ejecutar, 30 * 1000);
-}
-
-function iniciarSchedulerEstadosAsistencia() {
-    if (schedulerEstadosAsistenciaId) {
-        clearInterval(schedulerEstadosAsistenciaId);
-        schedulerEstadosAsistenciaId = null;
-    }
-
-    const ejecutarSincronizacion = async () => {
-        try {
-            await sincronizarEstadosAsistencia(pool);
-            console.log('🧭 Estados de asistencia sincronizados.');
-        } catch (error) {
-            console.error('⚠️ Error sincronizando estados de asistencia:', error);
-        }
-    };
-
-    ejecutarSincronizacion();
-    schedulerEstadosAsistenciaId = setInterval(ejecutarSincronizacion, ESTADOS_ASISTENCIA_SYNC_MINUTES * 60 * 1000);
+    schedulerQuickTunnelId = setInterval(ejecutar, QUICK_TUNNEL_SYNC_SECONDS * 1000);
 }
 
 function salidaGrupoPermitida(chat) {
@@ -545,6 +683,8 @@ const client = new Client({
     authStrategy: new LocalAuth({ clientId: 'bitacora-mtto' }),
     puppeteer: {
         headless: true,
+        timeout: WA_LAUNCH_TIMEOUT_MS,
+        protocolTimeout: WA_PROTOCOL_TIMEOUT_MS,
         executablePath: '/usr/bin/google-chrome',
         args: [
             '--no-sandbox',
@@ -606,7 +746,8 @@ client.on('ready', async () => {
     const version = await client.getWWebVersion();
     console.log('Version WhatsApp:', version);
     iniciarSchedulerReportes(client);
-    iniciarSchedulerEstadosAsistencia();
+    iniciarSchedulerQuickTunnel(client);
+    await revisarQuickTunnelUrl({ clientRef: client, forzar: true });
 });
 
 
@@ -617,6 +758,40 @@ client.on('ready', async () => {
 client.on('disconnected', (reason) => {
     console.log('\n⚠️ Cliente desconectado:', reason);
 });
+
+let initEnCurso = false;
+
+function esErrorTimeoutNavegacion(err) {
+    const detalle = `${err?.message || ''}\n${err?.stack || ''}`;
+    return /ProtocolError|Page\.navigate timed out/i.test(detalle);
+}
+
+async function inicializarClienteConReintento() {
+    if (initEnCurso) {
+        return;
+    }
+
+    initEnCurso = true;
+    try {
+        await client.initialize();
+    } catch (err) {
+        const esTimeoutNavegacion = esErrorTimeoutNavegacion(err);
+        console.error('\n❌ Fallo al inicializar cliente WhatsApp:', err?.message || err);
+        if (esTimeoutNavegacion) {
+            console.error(`⏳ Se detecto timeout de navegacion. Reintentando en ${WA_INIT_RETRY_DELAY_MS} ms...`);
+        } else {
+            console.error(`⏳ Reintentando inicializacion en ${WA_INIT_RETRY_DELAY_MS} ms...`);
+        }
+
+        setTimeout(() => {
+            inicializarClienteConReintento().catch((retryErr) => {
+                console.error('❌ Reintento de inicializacion fallo:', retryErr?.message || retryErr);
+            });
+        }, WA_INIT_RETRY_DELAY_MS);
+    } finally {
+        initEnCurso = false;
+    }
+}
 
 
 // =========================
@@ -673,10 +848,10 @@ client.on('message_create', async (message) => {
                 tipoFuente === 'SUPERVISOR' && esEntradaOperativaSupervisorDesdePropio(textoOriginal);
             const permitirFromMeBitacora =
                 tipoFuente === 'BITACORA' && (message.hasMedia || esEntradaOperativaBitacoraDesdePropio(textoOriginal));
-            const permitirFromMeMantenimiento =
-                tipoFuente === 'MANTENIMIENTO_ASISTENCIA'; // Saul es el mismo número del bot; registrar todo
+            const permitirFromMeAsistencia =
+                tipoFuente === 'ASISTENCIA_LIMPIEZA' || tipoFuente === 'ASISTENCIA_MTTO';
 
-            if (!permitirFromMeSupervisor && !permitirFromMeBitacora && !permitirFromMeMantenimiento) {
+            if (!permitirFromMeSupervisor && !permitirFromMeBitacora && !permitirFromMeAsistencia) {
                 console.log('⏸️ Mensaje fromMe ignorado:', {
                     grupo: chat.name,
                     tipoFuente,
@@ -814,15 +989,28 @@ client.on('message_create', async (message) => {
             return;
         }
 
-        if (tipoFuente === 'MANTENIMIENTO_ASISTENCIA') {
-            await manejarMantenimiento({
+        if (tipoFuente === 'ASISTENCIA_LIMPIEZA') {
+            // Limpieza: flujo con confirmacion final (solo si registro + ubicacion se completan).
+            await manejarAsistencia({
                 message: messageSafe,
                 chat: chatSafe,
                 textoOriginal,
                 nombreAutor,
-                autorNumero: message.author || '',
                 fecha,
-                tipoFuente
+                area: 'LIMPIEZA'
+            });
+            return;
+        }
+
+        if (tipoFuente === 'ASISTENCIA_MTTO') {
+            // MTTO: mismo registro en asistencia_eventos, sin respuesta automatica al grupo.
+            await manejarAsistencia({
+                message: messageSafe,
+                chat: chatSafe,
+                textoOriginal,
+                nombreAutor,
+                fecha,
+                area: 'MTTO'
             });
             return;
         }
@@ -839,4 +1027,6 @@ client.on('message_create', async (message) => {
 // INICIAR
 // =========================
 
-client.initialize();
+inicializarClienteConReintento().catch((err) => {
+    console.error('❌ Error no controlado al iniciar cliente WhatsApp:', err?.message || err);
+});
