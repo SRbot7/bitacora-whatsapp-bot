@@ -11,6 +11,7 @@ const VENTANA_UBICACION_MS = Math.max(
 );
 
 const pendientesUbicacion = {};
+const ubicacionesPendientes = {};
 
 function normalizarTexto(texto = '') {
     return texto
@@ -28,11 +29,39 @@ function detectarIntencion(texto = '') {
         return '';
     }
 
-    if (/\b(me retiro|retiro de sitio|salida|egreso|fin de turno|me voy)\b/.test(comando)) {
+    const tokens = comando
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter(Boolean);
+
+    const hasSitio = tokens.some((t) => t.startsWith('siti'));
+    const hasReporto = tokens.some((t) => (
+        t.startsWith('report')
+        || t.startsWith('repor')
+        || t.startsWith('repr')
+        || t === 'ingreso'
+        || t === 'entrada'
+        || t === 'llegada'
+    ));
+    const hasRetiro = tokens.some((t) => (
+        t.startsWith('retir')
+        || t === 'salida'
+        || t === 'egreso'
+        || t === 'salgo'
+        || t === 'voy'
+    ));
+
+    if (
+        /\b(me retiro|retiro de sitio|salida|egreso|fin de turno|me voy)\b/.test(comando)
+        || (hasSitio && hasRetiro)
+    ) {
         return 'SALIDA';
     }
 
-    if (/\b(me reporto en sitio|reporto en sitio|entrada|ingreso|inicio de turno|llegada)\b/.test(comando)) {
+    if (
+        /\b(me reporto en sitio|me reporto en el sitio|reporto en sitio|reporto en el sitio|entrada|ingreso|inicio de turno|llegada)\b/.test(comando)
+        || (hasSitio && hasReporto)
+    ) {
         return 'ENTRADA';
     }
 
@@ -51,6 +80,13 @@ function limpiarPendientes() {
         const item = pendientesUbicacion[clave];
         if (!item || (ahora - item.createdAtMs) > VENTANA_UBICACION_MS) {
             delete pendientesUbicacion[clave];
+        }
+    });
+
+    Object.keys(ubicacionesPendientes).forEach((clave) => {
+        const item = ubicacionesPendientes[clave];
+        if (!item || (ahora - item.createdAtMs) > VENTANA_UBICACION_MS) {
+            delete ubicacionesPendientes[clave];
         }
     });
 }
@@ -112,6 +148,22 @@ async function manejarAsistencia({ message, chat, textoOriginal, nombreAutor, fe
                 mensajeId
             });
 
+            const ubicacionPendiente = ubicacionesPendientes[clavePendiente];
+            if (ubicacionPendiente?.ubicacion) {
+                const actualizadaConPrevia = await actualizarUbicacionEvento({
+                    idEvento,
+                    ubicacion: ubicacionPendiente.ubicacion
+                });
+
+                if (actualizadaConPrevia && area === 'LIMPIEZA') {
+                    const accion = intencion === 'SALIDA' ? 'salida' : 'entrada';
+                    await message.reply(`✅ ${accion.toUpperCase()} registrada para ${autor}.`);
+                }
+
+                delete ubicacionesPendientes[clavePendiente];
+                return;
+            }
+
             pendientesUbicacion[clavePendiente] = {
                 idEvento,
                 tipoEvento: intencion,
@@ -127,13 +179,18 @@ async function manejarAsistencia({ message, chat, textoOriginal, nombreAutor, fe
         return;
     }
 
-    const pendiente = pendientesUbicacion[clavePendiente];
-    if (!pendiente?.idEvento) {
+    const ubicacion = obtenerDetalleUbicacion(message);
+    if (!ubicacion) {
         return;
     }
 
-    const ubicacion = obtenerDetalleUbicacion(message);
-    if (!ubicacion) {
+    const pendiente = pendientesUbicacion[clavePendiente];
+    if (!pendiente?.idEvento) {
+        // Flujo tolerante: si llega ubicacion antes que entrada/salida, se conserva temporalmente.
+        ubicacionesPendientes[clavePendiente] = {
+            ubicacion,
+            createdAtMs: Date.now()
+        };
         return;
     }
 

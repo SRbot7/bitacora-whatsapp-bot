@@ -21,9 +21,12 @@ async function asegurarTablaAsistenciaEventos() {
             mensaje_id TEXT,
             tipo_mensaje TEXT,
             ubicacion TEXT,
+            evidencia_ruta TEXT,
             created_at TIMESTAMP NOT NULL DEFAULT NOW()
         )
     `);
+
+    await pool.query('ALTER TABLE asistencia_eventos ADD COLUMN IF NOT EXISTS evidencia_ruta TEXT');
 
     await pool.query('CREATE INDEX IF NOT EXISTS idx_asistencia_eventos_fecha_area ON asistencia_eventos (fecha_operativa, area)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_asistencia_eventos_evento_at ON asistencia_eventos (evento_at DESC)');
@@ -49,7 +52,8 @@ async function registrarEventoAsistencia({
     chatId = '',
     mensajeId = '',
     tipoMensaje = '',
-    ubicacion = ''
+    ubicacion = '',
+    evidenciaRuta = ''
 }) {
     await asegurarTablaAsistenciaEventos();
 
@@ -76,9 +80,10 @@ async function registrarEventoAsistencia({
             chat_id,
             mensaje_id,
             tipo_mensaje,
-            ubicacion
+            ubicacion,
+            evidencia_ruta
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING id
         `,
         [
@@ -91,7 +96,8 @@ async function registrarEventoAsistencia({
             chatId || null,
             mensajeId || null,
             tipoMensaje || null,
-            ubicacion || null
+            ubicacion || null,
+            evidenciaRuta || null
         ]
     );
 
@@ -117,8 +123,27 @@ async function actualizarUbicacionEvento({ idEvento, ubicacion }) {
     return res.rowCount > 0;
 }
 
+async function actualizarEvidenciaEvento({ idEvento, evidenciaRuta }) {
+    await asegurarTablaAsistenciaEventos();
+    if (!idEvento || !evidenciaRuta) {
+        return false;
+    }
+
+    const res = await pool.query(
+        `
+        UPDATE asistencia_eventos
+        SET evidencia_ruta = $1
+        WHERE id = $2
+        `,
+        [evidenciaRuta, idEvento]
+    );
+
+    return res.rowCount > 0;
+}
+
 module.exports = {
     asegurarTablaAsistenciaEventos,
     registrarEventoAsistencia,
-    actualizarUbicacionEvento
+    actualizarUbicacionEvento,
+    actualizarEvidenciaEvento
 };

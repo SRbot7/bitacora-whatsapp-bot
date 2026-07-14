@@ -36,11 +36,18 @@ const MARCADOR_PERSONAL = [
         nombre: 'Jose Luis Velazquez Herrera',
         turno: '3er turno 22:00-06:00',
         aliases: ['jose luis velazquez herrera', 'jose luis', 'jose', 'zeus', 'zeus45745']
+    },
+    {
+        key: 'edgar_alfredo',
+        nombre: 'Edgar Alfredo Medina Lopez',
+        turno: '3er turno 22:00-06:00',
+        aliases: ['edgar alfredo medina lopez', 'edgar medina', 'edgar alfredo', 'edgar']
     }
 ];
 
 const DESCANSOS_FIJOS_PERSONAL = {
-    jose_luis: [5]
+    jose_luis: [5],
+    edgar_alfredo: [5]
 };
 
 // Primer turno: rotacion semanal +1 sobre [viernes(4), sabado(5), domingo(6)].

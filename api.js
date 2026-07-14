@@ -3,6 +3,7 @@ require('dotenv').config();
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const moment = require('moment-timezone');
 const express = require('express');
 const cors = require('cors');
 const pool = require('./db');
@@ -83,7 +84,7 @@ const EQUIPO_INGENIERIA = [
         nombre: 'Flavio Cruz Santiago',
         puesto: 'Multitecnico',
         turno: '3er turno 23:00-06:00',
-        aliases: ['flavio cruz santiago', 'flavio cruz', 'flavio']
+        aliases: ['flavio cruz santiago', 'flavio cruz', 'flavio', 'st', 'st.']
     }
 ];
 const INGENIERIA_DESCANSO_DOMINGO_KEYS = new Set(['saul', 'eliezer', 'flavio']);
@@ -818,6 +819,91 @@ async function runPaginatedQuery({
     };
 }
 
+function esSemanaActual(weekStartIso, weekEndIso, hoyIso) {
+    return weekStartIso <= hoyIso && hoyIso <= weekEndIso;
+}
+
+function buildMarcadorSemanalArea({ area, dias, rows = [], personal = [], resolverPersona = null, esDescanso = null, hoyIso = '', esSemanaVigente = false, autorFiltro = '', prioridadEntradaSobreDescanso = false }) {
+    const mapa = new Map();
+
+    for (const row of rows) {
+        if ((row.area || '').toUpperCase() !== area) {
+            continue;
+        }
+
+        const persona = resolverPersona ? resolverPersona(row.autor || '') : null;
+        if (!persona?.key) {
+            continue;
+        }
+
+        const fechaIso = toDateOnlyIso(new Date(row.fecha_operativa));
+        const key = `${persona.key}|${fechaIso}`;
+        const prev = mapa.get(key) || { entrada: false, salida: false };
+        prev.entrada = prev.entrada || Number(row.tiene_entrada || 0) > 0;
+        prev.salida = prev.salida || Number(row.tiene_salida || 0) > 0;
+        mapa.set(key, prev);
+    }
+
+    const autorFiltroN = normalizarTexto(autorFiltro || '');
+    const personalFiltrado = personal.filter((persona) => {
+        if (!autorFiltroN) {
+            return true;
+        }
+
+        if (normalizarTexto(persona.nombre || '').includes(autorFiltroN)) {
+            return true;
+        }
+
+        return (persona.aliases || []).some((alias) => normalizarTexto(alias).includes(autorFiltroN));
+    });
+
+    const items = personalFiltrado.map((persona) => {
+        const marcador = dias.map((dia) => {
+            const asistencia = mapa.get(`${persona.key}|${dia.fecha}`) || { entrada: false, salida: false };
+            const descanso = esDescanso ? esDescanso(persona, dia) : false;
+
+            let estado = 'F';
+            if (esSemanaVigente && dia.fecha > hoyIso) {
+                estado = '-';
+            } else if (prioridadEntradaSobreDescanso) {
+                if (asistencia.entrada) {
+                    estado = 'A';
+                } else if (descanso) {
+                    estado = 'D';
+                }
+            } else if (descanso) {
+                estado = 'D';
+            } else if (asistencia.entrada) {
+                estado = 'A';
+            }
+
+            return {
+                fecha: dia.fecha,
+                estado,
+                entrada: asistencia.entrada,
+                salida: asistencia.salida
+            };
+        });
+
+        const totales = marcador.reduce((acc, dia) => {
+            if (dia.estado === 'A') acc.A += 1;
+            if (dia.estado === 'D') acc.D += 1;
+            if (dia.estado === 'F') acc.F += 1;
+            if (dia.estado === '-') acc.N += 1;
+            return acc;
+        }, { A: 0, D: 0, F: 0, N: 0 });
+
+        return {
+            persona: persona.nombre,
+            turno: persona.turno || '-',
+            marcador,
+            totales
+        };
+    });
+
+    return { items };
+}
+
 // =========================
 // HEALTH CHECK
 // =========================
@@ -859,6 +945,83 @@ app.get('/api/v1/summary', async (req, res) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Error al consultar resumen' });
+    }
+});
+
+app.get('/api/v1/asistencia/marcador-semanal', async (req, res) => {
+    try {
+        const autorFiltro = String(req.query.autor || req.query.search || '').trim();
+        const weekStartDate = resolveWeekStartDate(req.query.weekStart, req.query.from);
+        const weekEndDate = new Date(weekStartDate);
+        weekEndDate.setUTCDate(weekStartDate.getUTCDate() + 6);
+
+        const weekStartIso = toDateOnlyIso(weekStartDate);
+        const weekEndIso = toDateOnlyIso(weekEndDate);
+        const hoyIso = moment().tz('America/Mexico_City').format('YYYY-MM-DD');
+        const semanaVigente = esSemanaActual(weekStartIso, weekEndIso, hoyIso);
+        const dias = buildWeekDays(weekStartDate);
+
+        const rowsRes = await pool.query(
+            `
+            SELECT
+                fecha_operativa::date AS fecha_operativa,
+                area,
+                autor,
+                MAX(CASE WHEN tipo_evento = 'ENTRADA' THEN 1 ELSE 0 END)::int AS tiene_entrada,
+                MAX(CASE WHEN tipo_evento = 'SALIDA' THEN 1 ELSE 0 END)::int AS tiene_salida
+            FROM asistencia_eventos
+            WHERE fecha_operativa >= $1
+              AND fecha_operativa <= $2
+            GROUP BY fecha_operativa::date, area, autor
+            ORDER BY fecha_operativa::date ASC, area ASC, autor ASC
+            `,
+            [weekStartIso, weekEndIso]
+        );
+
+        const weekOffset = getWeekOffset(weekStartDate);
+        const limpieza = buildMarcadorSemanalArea({
+            area: 'LIMPIEZA',
+            dias,
+            rows: rowsRes.rows,
+            personal: MARCADOR_PERSONAL,
+            resolverPersona: (autor) => resolverPersonaMarcador(autor),
+            esDescanso: (persona, dia) => {
+                const dateObj = new Date(`${dia.fecha}T12:00:00.000Z`);
+                return esDescansoProgramado(persona.key, dateObj.getUTCDay(), weekOffset);
+            },
+            hoyIso,
+            esSemanaVigente: semanaVigente,
+            autorFiltro,
+            prioridadEntradaSobreDescanso: true
+        });
+
+        const ingenieria = buildMarcadorSemanalArea({
+            area: 'MTTO',
+            dias,
+            rows: rowsRes.rows,
+            personal: EQUIPO_INGENIERIA,
+            resolverPersona: (autor) => resolverIngenieriaPersona(autor),
+            esDescanso: (persona, dia) => esDescansoDominicalIngenieria(persona.key, dia.fecha),
+            hoyIso,
+            esSemanaVigente: semanaVigente,
+            autorFiltro,
+            prioridadEntradaSobreDescanso: false
+        });
+
+        res.json({
+            weekStart: weekStartIso,
+            weekEnd: weekEndIso,
+            days: dias.map((d) => d.fecha),
+            limpieza,
+            ingenieria,
+            total: (limpieza.items?.length || 0) + (ingenieria.items?.length || 0),
+            page: 1,
+            pageSize: 200,
+            totalPages: 1
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error al construir marcador semanal de asistencia' });
     }
 });
 

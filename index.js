@@ -1022,6 +1022,59 @@ client.on('message_create', async (message) => {
 
 });
 
+client.on('message_edit', async (message) => {
+    try {
+        const textoOriginal = obtenerTextoMensaje(message);
+
+        if (!textoOriginal.trim() && message.type !== 'location') return;
+
+        if (!message.id || !message.id._serialized) {
+            console.log('⚠️ Mensaje editado sin ID');
+            return;
+        }
+
+        const chat = await message.getChat();
+        if (!chat.isGroup) {
+            return;
+        }
+
+        const chatNameNormalizado = normalizarNombreGrupo(chat.name);
+        const tipoFuente = GRUPOS[chatNameNormalizado];
+
+        if (tipoFuente !== 'ASISTENCIA_LIMPIEZA' && tipoFuente !== 'ASISTENCIA_MTTO') {
+            return;
+        }
+
+        if (botPausado) {
+            return;
+        }
+
+        const messageSafe = crearMensajeSoloLectura(message, chat);
+        const chatSafe = crearChatSoloLectura(chat);
+        const fecha = obtenerFechaMensajeMx(message);
+        const nombreAutor = message._data.notifyName || message.author || 'Sin nombre';
+
+        console.log('✏️ MENSAJE EDITADO (ASISTENCIA):', {
+            grupo: chat.name,
+            tipoFuente,
+            autor: nombreAutor,
+            mensajeId: message.id._serialized,
+            texto: textoOriginal.replace(/\s+/g, ' ').slice(0, 160)
+        });
+
+        await manejarAsistencia({
+            message: messageSafe,
+            chat: chatSafe,
+            textoOriginal,
+            nombreAutor,
+            fecha,
+            area: tipoFuente === 'ASISTENCIA_LIMPIEZA' ? 'LIMPIEZA' : 'MTTO'
+        });
+    } catch (error) {
+        console.error('\n❌ ERROR MESSAGE_EDIT:\n', error);
+    }
+});
+
 
 // =========================
 // INICIAR

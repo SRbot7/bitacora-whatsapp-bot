@@ -2,8 +2,6 @@ const state = {
     tab: 'principal',
     scope: 'pendientes',
     limpiezaView: 'actividades',
-    asistenciaScope: 'marcador',
-    supervisorAsistenciaScope: 'marcador',
     page: 1,
     pageSize: 20,
     totalPages: 1,
@@ -21,12 +19,8 @@ const els = {
     tabs: document.querySelectorAll('.tab'),
     subtabsWrap: document.getElementById('subtabs-supervisor'),
     subtabs: document.querySelectorAll('#subtabs-supervisor .subtab'),
-    subtabsSupervisorAsistenciaWrap: document.getElementById('subtabs-supervisor-asistencia'),
-    subtabsSupervisorAsistencia: document.querySelectorAll('[data-supervisor-asistencia-scope]'),
     subtabsLimpiezaWrap: document.getElementById('subtabs-limpieza'),
     subtabsLimpieza: document.querySelectorAll('[data-limpieza-view]'),
-    subtabsAsistenciaWrap: document.getElementById('subtabs-asistencia'),
-    subtabsAsistencia: document.querySelectorAll('.asistencia-subtab'),
     filtersWrap: document.getElementById('filters-wrap'),
     paginationWrap: document.getElementById('pagination-wrap'),
     filterSearch: document.getElementById('filter-search'),
@@ -273,51 +267,16 @@ function buildParams() {
     if (state.tab === 'limpieza' && extra) params.set('autor', extra);
 
     if (state.tab === 'supervisor' && extra) {
+        if (state.scope === 'asistencia') params.set('autor', extra);
         if (state.scope === 'pendientes') params.set('estado', extra);
         if (state.scope === 'preventivos') params.set('estado', extra);
         if (state.scope === 'completados') params.set('prioridad', extra);
         if (state.scope === 'proyectos') params.set('estado', extra);
     }
 
-    const hasCustomRange = Boolean(els.filterFrom.value || els.filterTo.value);
-    const defaultRange = getDefaultAttendanceRange(
-        state.tab === 'supervisor' && state.scope === 'asistencia'
-            ? state.supervisorAsistenciaScope
-            : state.tab === 'limpieza' && state.limpiezaView === 'asistencia'
-                ? state.asistenciaScope
-                : ''
-    );
-
-    if (!hasCustomRange) {
-        if (state.tab === 'supervisor' && state.scope === 'asistencia') {
-            if (state.supervisorAsistenciaScope === 'mensual') {
-                params.set('month', defaultRange.month);
-            } else if (state.supervisorAsistenciaScope === 'semanal') {
-                params.set('weekStart', defaultRange.weekStart);
-            } else if (state.supervisorAsistenciaScope === 'marcador') {
-                params.set('weekStart', defaultRange.weekStart);
-            } else {
-                params.set('from', defaultRange.from);
-                params.set('to', defaultRange.to);
-            }
-        }
-
-        if (state.tab === 'limpieza' && state.limpiezaView === 'asistencia') {
-            if (state.asistenciaScope === 'mensual') {
-                params.set('from', defaultRange.from);
-                params.set('to', defaultRange.to);
-                params.set('month', defaultRange.month);
-            } else if (state.asistenciaScope === 'semanal') {
-                params.set('from', defaultRange.from);
-                params.set('to', defaultRange.to);
-                params.set('weekStart', defaultRange.weekStart);
-            } else if (state.asistenciaScope === 'marcador') {
-                params.set('weekStart', defaultRange.weekStart);
-            } else {
-                params.set('from', defaultRange.from);
-                params.set('to', defaultRange.to);
-            }
-        }
+    if (state.tab === 'supervisor' && state.scope === 'asistencia') {
+        const fromDate = from ? String(from).slice(0, 10) : '';
+        params.set('weekStart', fromDate || getWeekRangeMx().weekStart);
     }
 
     return params;
@@ -326,39 +285,10 @@ function buildParams() {
 function getEndpoint() {
     if (state.tab === 'principal') return '';
     if (state.tab === 'supervisor' && state.scope === 'bitacora') return '/api/v1/bitacora/actividades';
-    if (state.tab === 'supervisor' && state.scope === 'alertas') return '/api/v1/supervisor/asistencia-alertas';
-    if (state.tab === 'supervisor' && state.scope === 'asistencia') {
-        if (state.supervisorAsistenciaScope === 'mensual') {
-            return '/api/v1/ingenieria/asistencia-mensual';
-        }
-
-        if (state.supervisorAsistenciaScope === 'semanal') {
-            return '/api/v1/ingenieria/asistencia-semanal';
-        }
-
-        if (state.supervisorAsistenciaScope === 'marcador') {
-            return '/api/v1/ingenieria/asistencia-marcador';
-        }
-
-        return '/api/v1/ingenieria/asistencia-hoy';
-    }
+    if (state.tab === 'supervisor' && state.scope === 'asistencia') return '/api/v1/asistencia/marcador-semanal';
 
     if (state.tab === 'limpieza') {
-        if (state.limpiezaView === 'actividades') {
-            return '/api/v1/limpieza/actividades';
-        }
-
-        if (state.asistenciaScope === 'mensual') {
-            return '/api/v1/limpieza/asistencia-mensual';
-        }
-
-        if (state.asistenciaScope === 'marcador') {
-            return '/api/v1/limpieza/asistencia-marcador';
-        }
-
-        return state.asistenciaScope === 'semanal'
-            ? '/api/v1/limpieza/asistencia-semanal'
-            : '/api/v1/limpieza/asistencia';
+        return '/api/v1/limpieza/actividades';
     }
     if (state.tab === 'supervisor' && state.scope === 'preventivos') return '/api/v1/supervisor/preventivos';
     if (state.tab === 'supervisor' && state.scope === 'completados') return '/api/v1/supervisor/completados';
@@ -534,7 +464,7 @@ function esProyectoAbierto(estado = '') {
     return !['cerrado', 'completado', 'cancelado', 'finalizado'].includes(e);
 }
 
-function renderHomeImpactIndicators({ pendientesHoy = 0, alertasHoy = 0, mttoEnTurnoHoy = 0, limpiezaEnTurnoHoy = 0, proyectosActivos = 0 }) {
+function renderHomeImpactIndicators({ pendientesHoy = 0, preventivosHoy = 0, limpiezaHoy = 0, proyectosActivos = 0 }) {
     return `
         <section class="home-impact-row">
             <button class="home-impact-card critical" type="button" data-home-tab="supervisor" data-home-scope="pendientes">
@@ -542,20 +472,15 @@ function renderHomeImpactIndicators({ pendientesHoy = 0, alertasHoy = 0, mttoEnT
                 <strong>${fmtNum(pendientesHoy)}</strong>
                 <small>Pendientes abiertos hoy</small>
             </button>
-            <button class="home-impact-card warning" type="button" data-home-tab="supervisor" data-home-scope="alertas">
-                <span class="home-impact-label">Alertas activas</span>
-                <strong>${fmtNum(alertasHoy)}</strong>
-                <small>Asistencia fuera de tolerancia</small>
+            <button class="home-impact-card warning" type="button" data-home-tab="supervisor" data-home-scope="preventivos">
+                <span class="home-impact-label">Preventivos</span>
+                <strong>${fmtNum(preventivosHoy)}</strong>
+                <small>Preventivos abiertos</small>
             </button>
-            <button class="home-impact-card mtto" type="button" data-home-tab="supervisor" data-home-scope="asistencia" data-home-supervisor-asistencia-scope="hoy">
-                <span class="home-impact-label">MTTO en turno</span>
-                <strong>${fmtNum(mttoEnTurnoHoy)}</strong>
-                <small>Cobertura actual de ingenieria</small>
-            </button>
-            <button class="home-impact-card limpieza" type="button" data-home-tab="limpieza" data-home-limpieza-view="asistencia" data-home-asistencia-scope="diaria">
-                <span class="home-impact-label">Limpieza en turno</span>
-                <strong>${fmtNum(limpiezaEnTurnoHoy)}</strong>
-                <small>Cobertura actual de limpieza</small>
+            <button class="home-impact-card limpieza" type="button" data-home-tab="limpieza" data-home-limpieza-view="actividades">
+                <span class="home-impact-label">Limpieza hoy</span>
+                <strong>${fmtNum(limpiezaHoy)}</strong>
+                <small>Actividades registradas</small>
             </button>
             <button class="home-impact-card projects" type="button" data-home-tab="supervisor" data-home-scope="proyectos">
                 <span class="home-impact-label">Proyectos activos</span>
@@ -566,44 +491,18 @@ function renderHomeImpactIndicators({ pendientesHoy = 0, alertasHoy = 0, mttoEnT
     `;
 }
 
-function renderPrincipalListado({ summary, pendientes, asistenciaLimpieza, asistenciaMtto, estadoAsistencia, preventivos, alertasAsistencia, limpiezaMensual, mttoMensual, proyectosActivosCount }) {
+function renderPrincipalListado({ summary, pendientes, preventivos, proyectosActivosCount }) {
     const pendientesAbiertos = (pendientes.items || []).filter((x) => {
         return (x.estado || '').toLowerCase() === 'pendiente';
     }).slice(0, 5);
 
-    const asistenciaCritica = (asistenciaLimpieza.items || []).map((p) => {
-        const faltas = Number(p?.totales?.F || 0);
-        return {
-            persona: p.persona,
-            turno: p.turno,
-            faltas
-        };
-    }).sort((a, b) => b.faltas - a.faltas).slice(0, 5);
-
     const topPendiente = pendientesAbiertos[0] || null;
     const preventivosAbiertos = preventivos?.items || [];
-    const alertasActivas = alertasAsistencia?.items || [];
-    const indicadorLimpieza = construirIndicadorEstadoPersistido(estadoAsistencia?.limpieza || [], 'LIMPIEZA');
-    const indicadorMtto = construirIndicadorEstadoPersistido(estadoAsistencia?.mantenimiento || [], 'MTTO');
-    const mensualLimpieza = construirResumenMensualLimpieza(limpiezaMensual);
-    const mensualMtto = construirResumenMensualMtto(mttoMensual);
-    const hoyMtto = construirResumenMttoHoy(asistenciaMtto);
-    const hoyLimpieza = {
-        enTurno: indicadorLimpieza.enTurno.length,
-        salida: indicadorLimpieza.salida.length,
-        fueraTurno: indicadorLimpieza.fueraTurno.length,
-        descanso: indicadorLimpieza.descanso.length,
-        permiso: indicadorLimpieza.permiso.length
-    };
 
-    const maxFaltas = asistenciaCritica.length
-        ? Math.max(...asistenciaCritica.map((x) => Number(x.faltas || 0)))
-        : 0;
-
-    const semaforo = Number(summary.pendientesAbiertos || 0) > 5 || maxFaltas >= 3
-        ? { code: 'ROJO', className: 'estado-f', msg: 'Atencion inmediata en pendientes y asistencia.' }
-        : Number(summary.pendientesAbiertos || 0) > 2 || maxFaltas >= 2
-            ? { code: 'AMARILLO', className: 'estado-r', msg: 'Riesgo operativo moderado, vigilar indicadores.' }
+    const semaforo = Number(summary.pendientesAbiertos || 0) > 5
+        ? { code: 'ROJO', className: 'estado-f', msg: 'Atencion inmediata en pendientes.' }
+        : Number(summary.pendientesAbiertos || 0) > 2
+            ? { code: 'AMARILLO', className: 'estado-r', msg: 'Riesgo operativo moderado, vigilar pendientes.' }
             : { code: 'VERDE', className: 'estado-a', msg: 'Operacion estable con seguimiento normal.' };
 
     const totalPreventivos = summary.pendientesPreventivos ?? 0;
@@ -620,7 +519,7 @@ function renderPrincipalListado({ summary, pendientes, asistenciaLimpieza, asist
                 <span>Pendientes ${summary.pendientesAbiertos ?? '-'}</span>
                 <span>Preventivos ${summary.pendientesPreventivos ?? '-'}</span>
                 <span>Proyectos activos ${proyectosActivos}</span>
-                <span>Alertas ${alertasActivas.length}</span>
+                <span>Limpieza ${summary.limpieza ?? '-'}</span>
             </div>
         </div>
 
@@ -645,30 +544,27 @@ function renderPrincipalListado({ summary, pendientes, asistenciaLimpieza, asist
                         <strong>${fmtNum(totalPreventivos)}</strong>
                         <span>Preventivos</span>
                     </button>
-                    <button class="home-kpi-card" type="button" data-home-tab="supervisor" data-home-scope="asistencia" data-home-supervisor-asistencia-scope="hoy">
+                    <button class="home-kpi-card" type="button" data-home-tab="supervisor" data-home-scope="bitacora">
                         <small>Hoy</small>
-                        <strong>${fmtNum(hoyMtto.asistencia)}</strong>
-                        <span>Asistencia en tiempo</span>
+                        <strong>${fmtNum(summary.bitacora ?? 0)}</strong>
+                        <span>Registros bitacora</span>
                     </button>
-                    <button class="home-kpi-card" type="button" data-home-tab="supervisor" data-home-scope="asistencia" data-home-supervisor-asistencia-scope="mensual">
-                        <small>Mes actual</small>
-                        <strong>${fmtNum(mensualMtto.reportes)}</strong>
-                        <span>Reportes MTTO</span>
+                    <button class="home-kpi-card" type="button" data-home-tab="supervisor" data-home-scope="proyectos">
+                        <small>Actual</small>
+                        <strong>${proyectosActivos}</strong>
+                        <span>Proyectos activos</span>
                     </button>
                 </div>
 
                 <div class="home-area-strip">
-                    <span>En turno: <b>${indicadorMtto.enTurno.length}</b></span>
-                    <span>Salida: <b>${indicadorMtto.salida.length}</b></span>
-                    <span>Descanso: <b>${indicadorMtto.descanso.length}</b></span>
-                    <span>Permiso: <b>${indicadorMtto.permiso.length}</b></span>
-                    <span>Evidencias mes: <b>${fmtNum(mensualMtto.evidencias)}</b></span>
+                    <span>Pendientes: <b>${fmtNum(summary.pendientesAbiertos ?? 0)}</b></span>
+                    <span>Preventivos: <b>${fmtNum(totalPreventivos)}</b></span>
+                    <span>Bitacora: <b>${fmtNum(summary.bitacora ?? 0)}</b></span>
                 </div>
 
                 <div class="home-actions-grid">
-                    <button class="home-action-btn" type="button" data-home-tab="supervisor" data-home-scope="asistencia" data-home-supervisor-asistencia-scope="marcador">Marcador asistencia MTTO</button>
                     <button class="home-action-btn" type="button" data-home-tab="supervisor" data-home-scope="preventivos">Preventivos abiertos</button>
-                    <button class="home-action-btn" type="button" data-home-tab="supervisor" data-home-scope="alertas">Alertas de asistencia</button>
+                    <button class="home-action-btn" type="button" data-home-tab="supervisor" data-home-scope="bitacora">Bitacora MTTO</button>
                     <button class="home-action-btn" type="button" data-home-tab="supervisor" data-home-scope="proyectos">Proyectos activos</button>
                 </div>
 
@@ -700,68 +596,29 @@ function renderPrincipalListado({ summary, pendientes, asistenciaLimpieza, asist
                         <strong>${fmtNum(summary.limpieza ?? 0)}</strong>
                         <span>Actividades</span>
                     </button>
-                    <button class="home-kpi-card" type="button" data-home-tab="limpieza" data-home-limpieza-view="asistencia" data-home-asistencia-scope="diaria">
-                        <small>Hoy</small>
-                        <strong>${fmtNum(hoyLimpieza.enTurno)}</strong>
-                        <span>En turno</span>
-                    </button>
-                    <button class="home-kpi-card" type="button" data-home-tab="limpieza" data-home-limpieza-view="asistencia" data-home-asistencia-scope="mensual">
-                        <small>Mes actual</small>
-                        <strong>${fmtNum(mensualLimpieza.reportes)}</strong>
-                        <span>Reportes limpieza</span>
-                    </button>
-                    <button class="home-kpi-card" type="button" data-home-tab="limpieza" data-home-limpieza-view="asistencia" data-home-asistencia-scope="mensual">
-                        <small>Mes actual</small>
-                        <strong>${fmtNum(mensualLimpieza.evidencias)}</strong>
-                        <span>Evidencias limpieza</span>
+                    <button class="home-kpi-card" type="button" data-home-tab="limpieza" data-home-limpieza-view="actividades">
+                        <small>Actual</small>
+                        <strong>${fmtNum(summary.limpieza ?? 0)}</strong>
+                        <span>Carga operativa</span>
                     </button>
                 </div>
 
                 <div class="home-area-strip">
-                    <span>Salida: <b>${hoyLimpieza.salida}</b></span>
-                    <span>Fuera turno: <b>${hoyLimpieza.fueraTurno}</b></span>
-                    <span>Descanso: <b>${hoyLimpieza.descanso}</b></span>
-                    <span>Permiso: <b>${hoyLimpieza.permiso}</b></span>
-                    <span>Personas mes: <b>${fmtNum(mensualLimpieza.personas)}</b></span>
+                    <span>Actividades: <b>${fmtNum(summary.limpieza ?? 0)}</b></span>
+                    <span>Pendientes abiertos: <b>${fmtNum(summary.pendientesAbiertos ?? 0)}</b></span>
                 </div>
 
                 <div class="home-actions-grid">
-                    <button class="home-action-btn" type="button" data-home-tab="limpieza" data-home-limpieza-view="asistencia" data-home-asistencia-scope="marcador">Marcador asistencia limpieza</button>
-                    <button class="home-action-btn" type="button" data-home-tab="limpieza" data-home-limpieza-view="asistencia" data-home-asistencia-scope="semanal">Asistencia semanal</button>
-                    <button class="home-action-btn" type="button" data-home-tab="limpieza" data-home-limpieza-view="asistencia" data-home-asistencia-scope="mensual">Asistencia mensual</button>
                     <button class="home-action-btn" type="button" data-home-tab="limpieza" data-home-limpieza-view="actividades">Bitacora limpieza</button>
                 </div>
 
                 <div class="home-list-mini">
-                    ${asistenciaCritica.length
-                        ? asistenciaCritica.slice(0, 3).map((item) => `
-                            <div class="home-list-item alert-item">
-                                <b>${item.persona}</b>
-                                <span>${item.turno || '-'} · faltas: ${item.faltas}</span>
-                                <small>Seguimiento de asistencia</small>
-                            </div>
-                        `).join('')
-                        : '<div class="home-list-empty">Sin incidencias de asistencia para limpieza.</div>'}
+                    <div class="home-list-empty">Vista de limpieza enfocada en actividades y evidencias.</div>
                 </div>
             </article>
         </section>
 
         <section class="home-bottom-grid">
-            <button class="card home-mini-card home-alert-card home-panel-button" type="button" data-home-tab="supervisor" data-home-scope="alertas">
-                <h3>Alertas activas de asistencia</h3>
-                <div class="home-list-mini">
-                    ${alertasActivas.length
-                        ? alertasActivas.slice(0, 4).map((item) => `
-                            <div class="home-list-item alert-item">
-                                <b>${item.persona}</b>
-                                <span>${item.turno} · ${item.minutosAtraso} min de atraso</span>
-                                <small>${item.grupo}</small>
-                            </div>
-                        `).join('')
-                        : '<div class="home-list-empty">Sin alertas activas de asistencia.</div>'}
-                </div>
-            </button>
-
             <button class="card home-mini-card home-panel-button" type="button" data-home-tab="supervisor" data-home-scope="pendientes">
                 <h3>Pendiente clave del turno</h3>
                 <div class="home-mini-line">${topPendiente ? `#${topPendiente.id} · ${topPendiente.area || '-'} · ${topPendiente.prioridad || '-'}` : 'Sin pendientes abiertos relevantes.'}</div>
@@ -962,52 +819,36 @@ function renderAlertasAsistenciaListado(data) {
 }
 
 async function cargarVistaPrincipal() {
-    const monthRange = getMonthRangeMx();
-    const [summaryResp, pendientesResp, asistenciaLimpiezaResp, asistenciaMttoResp, estadoAsistenciaResp, preventivosResp, alertasResp, limpiezaMensualResp, mttoMensualResp, proyectosResp] = await Promise.all([
+    const [summaryResp, pendientesResp, preventivosResp, proyectosResp] = await Promise.all([
         apiFetch('/api/v1/summary'),
         apiFetch('/api/v1/supervisor/pendientes?page=1&pageSize=25'),
-        apiFetch('/api/v1/limpieza/asistencia-marcador?page=1&pageSize=50'),
-        apiFetch('/api/v1/ingenieria/asistencia-hoy?page=1&pageSize=50'),
-        apiFetch('/api/v1/asistencia/estado-hoy'),
         apiFetch('/api/v1/supervisor/preventivos?page=1&pageSize=10'),
-        apiFetch('/api/v1/supervisor/asistencia-alertas?page=1&pageSize=50'),
-        apiFetch(`/api/v1/limpieza/asistencia-mensual?from=${monthRange.from}&to=${monthRange.to}&page=1&pageSize=100`),
-        apiFetch(`/api/v1/ingenieria/asistencia-mensual?from=${monthRange.from}&to=${monthRange.to}&page=1&pageSize=100`),
         apiFetch('/api/v1/supervisor/proyectos?page=1&pageSize=200')
     ]);
 
-    if (!summaryResp.ok || !pendientesResp.ok || !asistenciaLimpiezaResp.ok || !asistenciaMttoResp.ok || !estadoAsistenciaResp.ok || !preventivosResp.ok || !alertasResp.ok || !limpiezaMensualResp.ok || !mttoMensualResp.ok || !proyectosResp.ok) {
+    if (!summaryResp.ok || !pendientesResp.ok || !preventivosResp.ok || !proyectosResp.ok) {
         throw new Error('No se pudo cargar la vista principal');
     }
 
-    const [summary, pendientes, asistenciaLimpieza, asistenciaMtto, estadoAsistencia, preventivos, alertasAsistencia, limpiezaMensual, mttoMensual, proyectos] = await Promise.all([
+    const [summary, pendientes, preventivos, proyectos] = await Promise.all([
         summaryResp.json(),
         pendientesResp.json(),
-        asistenciaLimpiezaResp.json(),
-        asistenciaMttoResp.json(),
-        estadoAsistenciaResp.json(),
         preventivosResp.json(),
-        alertasResp.json(),
-        limpiezaMensualResp.json(),
-        mttoMensualResp.json(),
         proyectosResp.json()
     ]);
 
-    const indicadorLimpieza = construirIndicadorEstadoPersistido(estadoAsistencia?.limpieza || [], 'LIMPIEZA');
-    const indicadorMtto = construirIndicadorEstadoPersistido(estadoAsistencia?.mantenimiento || [], 'MTTO');
     const proyectosActivosCount = (proyectos?.items || []).filter((p) => esProyectoAbierto(p?.estado)).length;
 
     if (els.homeTopIndicators) {
         els.homeTopIndicators.innerHTML = renderHomeImpactIndicators({
             pendientesHoy: summary.pendientesAbiertos ?? 0,
-            alertasHoy: (alertasAsistencia?.items || []).length,
-            mttoEnTurnoHoy: indicadorMtto.enTurno.length,
-            limpiezaEnTurnoHoy: indicadorLimpieza.enTurno.length,
+            preventivosHoy: summary.pendientesPreventivos ?? 0,
+            limpiezaHoy: summary.limpieza ?? 0,
             proyectosActivos: proyectosActivosCount
         });
     }
 
-    els.listado.innerHTML = renderPrincipalListado({ summary, pendientes, asistenciaLimpieza, asistenciaMtto, estadoAsistencia, preventivos, alertasAsistencia, limpiezaMensual, mttoMensual, proyectosActivosCount });
+    els.listado.innerHTML = renderPrincipalListado({ summary, pendientes, preventivos, proyectosActivosCount });
     els.status.textContent = 'Vista principal actualizada.';
     els.pageInfo.textContent = 'Principal';
 }
@@ -1413,11 +1254,88 @@ function renderAsistenciaAgrupadaListado(data, descansosHtml = '') {
 }
 
 function classByEstado(estado) {
+    if (estado === 'N' || estado === '-') return '';
     if (estado === 'A') return 'estado-a';
     if (estado === 'D') return 'estado-d';
     if (estado === 'P') return 'estado-p';
     if (estado === 'R') return 'estado-r';
     return 'estado-f';
+}
+
+function renderMarcadorSemanalArea({ titulo = '', dias = [], items = [] }) {
+    if (!items.length) {
+        return `
+            <section class="card">
+                <h3>${titulo}</h3>
+                <div class="empty-state">Sin datos para esta semana.</div>
+            </section>
+        `;
+    }
+
+    const headDias = (dias || []).map((day) => `<th class="fecha-col">${formatDiaCabecera(day)}</th>`).join('');
+    const bodyRows = items.map((item) => {
+        const diasCols = (item.marcador || []).map((dia) => {
+            const estado = dia.estado || '-';
+            const className = classByEstado(estado === '-' ? 'N' : estado);
+            return `<td><span class="asistencia-chip ${className}">${estado}</span></td>`;
+        }).join('');
+
+        return `
+            <tr>
+                <td class="persona-col">${item.persona || '-'}</td>
+                <td class="turno-col">${item.turno || '-'}</td>
+                ${diasCols}
+                <td class="tot-col">${item.totales?.A ?? 0}</td>
+                <td class="tot-col">${item.totales?.D ?? 0}</td>
+                <td class="tot-col">${item.totales?.F ?? 0}</td>
+            </tr>
+        `;
+    }).join('');
+
+    return `
+        <section class="card">
+            <h3>${titulo}</h3>
+            <div class="marcador-wrap">
+                <table class="marcador-table">
+                    <thead>
+                        <tr>
+                            <th class="persona-col">Persona</th>
+                            <th class="turno-col">Turno</th>
+                            ${headDias}
+                            <th>A</th>
+                            <th>D</th>
+                            <th>F</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${bodyRows}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    `;
+}
+
+function renderMarcadorSemanalAsistencia(data = {}) {
+    const dias = data.days || [];
+    const limpieza = data.limpieza?.items || [];
+    const ingenieria = data.ingenieria?.items || [];
+    const periodo = `Semana: ${formatFechaCorta(data.weekStart)} - ${formatFechaCorta(data.weekEnd)}`;
+
+    return `
+        <div class="card card-section-title">
+            <h3>Asistencia semanal en tiempo real</h3>
+            <div class="section-subtitle">${periodo}</div>
+        </div>
+        <div class="asistencia-legend">
+            <span class="asistencia-chip estado-a">A</span> Asistencia
+            <span class="asistencia-chip estado-d">D</span> Descanso
+            <span class="asistencia-chip estado-f">F</span> Falta
+            <span class="asistencia-chip">-</span> Dia no transcurrido
+        </div>
+        ${renderMarcadorSemanalArea({ titulo: 'Limpieza | Marcador semanal', dias, items: limpieza })}
+        ${renderMarcadorSemanalArea({ titulo: 'Ingenieria | Marcador semanal', dias, items: ingenieria })}
+    `;
 }
 
 function renderAsistenciaMarcadorListado(data) {
@@ -1649,26 +1567,14 @@ async function cargarListado() {
         state.totalPages = data.totalPages || 1;
         state.page = Math.min(state.page, state.totalPages);
 
-        if (state.tab === 'limpieza' && state.limpiezaView === 'asistencia') {
-            const scope = state.asistenciaScope === 'hoy' ? 'diaria' : state.asistenciaScope;
-            const descansosHtml = (scope === 'diaria' || scope === 'semanal' || scope === 'mensual')
-                ? await buildDescansosPanelForLimpieza(scope, params)
-                : '';
+        if (state.tab === 'supervisor' && state.scope === 'asistencia') {
+            els.listado.innerHTML = renderMarcadorSemanalAsistencia(data);
+            els.pageInfo.textContent = 'Marcador semanal';
+            els.status.textContent = 'Asistencia semanal actualizada.';
+            return;
+        }
 
-            if (state.asistenciaScope === 'semanal' || state.asistenciaScope === 'mensual') {
-                els.listado.innerHTML = renderAsistenciaAgrupadaListado(data, descansosHtml);
-            } else if (state.asistenciaScope === 'marcador') {
-                els.listado.innerHTML = renderAsistenciaMarcadorListado(data);
-            } else {
-                els.listado.innerHTML = renderAsistenciaListado(data.items || [], descansosHtml);
-            }
-        } else if (state.tab === 'supervisor' && state.scope === 'alertas') {
-            els.listado.innerHTML = renderAlertasAsistenciaListado(data);
-        } else if (state.tab === 'supervisor' && state.scope === 'asistencia') {
-            els.listado.innerHTML = state.supervisorAsistenciaScope === 'marcador'
-                ? renderSupervisorAsistenciaMarcadorListado(data)
-                : renderSupervisorAsistenciaListado(data);
-        } else if (state.tab === 'supervisor' && state.scope === 'bitacora') {
+        if (state.tab === 'supervisor' && state.scope === 'bitacora') {
             const items = data.items || [];
             els.listado.innerHTML = `
                 <div class="card card-section-title">
@@ -1695,6 +1601,9 @@ async function cargarListado() {
                 </div>
                 ${items.length ? items.map(renderCard).join('') : '<div class="empty-state">No hay registros completados.</div>'}
             `;
+        } else if (state.tab === 'limpieza' && state.limpiezaView === 'actividades') {
+            const items = data.items || [];
+            els.listado.innerHTML = items.length ? items.map(renderCard).join('') : '<div class="empty-state">No hay actividades de limpieza para los filtros actuales.</div>';
         } else {
             els.listado.innerHTML = (data.items || []).map(renderCard).join('');
         }
@@ -1885,18 +1794,6 @@ function marcarSubtabsActivos() {
             btn.classList.toggle('active', btn.dataset.limpiezaView === state.limpiezaView);
         });
     }
-
-    if (els.subtabsAsistencia) {
-        els.subtabsAsistencia.forEach((btn) => {
-            btn.classList.toggle('active', btn.dataset.asistenciaScope === state.asistenciaScope);
-        });
-    }
-
-    if (els.subtabsSupervisorAsistencia) {
-        els.subtabsSupervisorAsistencia.forEach((btn) => {
-            btn.classList.toggle('active', btn.dataset.supervisorAsistenciaScope === state.supervisorAsistenciaScope);
-        });
-    }
 }
 
 function navegarDesdeHome(config) {
@@ -1911,14 +1808,6 @@ function navegarDesdeHome(config) {
         state.limpiezaView = config.limpiezaView;
     }
 
-    if (config.asistenciaScope) {
-        state.asistenciaScope = config.asistenciaScope;
-    }
-
-    if (config.supervisorAsistenciaScope) {
-        state.supervisorAsistenciaScope = config.supervisorAsistenciaScope;
-    }
-
     marcarTabsActivos(state.tab);
     syncUiByTab();
     marcarSubtabsActivos();
@@ -1929,7 +1818,6 @@ function syncUiByTab() {
     const isPrincipal = state.tab === 'principal';
     const isSupervisor = state.tab === 'supervisor';
     const isLimpieza = state.tab === 'limpieza';
-    const isAsistencia = isLimpieza && state.limpiezaView === 'asistencia';
     const isSupervisorAsistencia = isSupervisor && state.scope === 'asistencia';
     const isSupervisorPreventivos = isSupervisor && state.scope === 'preventivos';
 
@@ -1937,19 +1825,13 @@ function syncUiByTab() {
     if (els.subtabsLimpiezaWrap) {
         els.subtabsLimpiezaWrap.hidden = !isLimpieza;
     }
-    if (els.subtabsAsistenciaWrap) {
-        els.subtabsAsistenciaWrap.hidden = !isAsistencia;
-    }
-    if (els.subtabsSupervisorAsistenciaWrap) {
-        els.subtabsSupervisorAsistenciaWrap.hidden = !isSupervisorAsistencia;
-    }
 
     if (els.filtersWrap) {
         els.filtersWrap.hidden = isPrincipal;
     }
 
     if (els.paginationWrap) {
-        els.paginationWrap.hidden = isPrincipal;
+        els.paginationWrap.hidden = isPrincipal || isSupervisorAsistencia;
     }
 
     if (els.homeTopIndicators) {
@@ -1963,7 +1845,7 @@ function syncUiByTab() {
     } else if (state.tab === 'limpieza') {
         els.filterExtra.placeholder = 'Autor';
     } else if (isSupervisorAsistencia) {
-        els.filterExtra.placeholder = 'No aplica en Asistencia';
+        els.filterExtra.placeholder = 'Persona (opcional)';
     } else if (isSupervisorPreventivos) {
         els.filterExtra.placeholder = 'Prioridad';
     } else if (isSupervisor && state.scope === 'completados') {
@@ -1981,9 +1863,7 @@ function initEvents() {
         navegarDesdeHome({
             tab: card.dataset.homeTab,
             scope: card.dataset.homeScope,
-            limpiezaView: card.dataset.homeLimpiezaView,
-            asistenciaScope: card.dataset.homeAsistenciaScope,
-            supervisorAsistenciaScope: card.dataset.homeSupervisorAsistenciaScope
+            limpiezaView: card.dataset.homeLimpiezaView
         });
     });
 
@@ -2011,27 +1891,6 @@ function initEvents() {
         els.subtabsLimpieza.forEach((sub) => {
             sub.onclick = () => {
                 state.limpiezaView = sub.dataset.limpiezaView;
-                state.page = 1;
-                marcarSubtabsActivos();
-                syncUiByTab();
-                cargarListado();
-            };
-        });
-    }
-
-    els.subtabsAsistencia.forEach((sub) => {
-        sub.onclick = () => {
-            state.asistenciaScope = sub.dataset.asistenciaScope;
-            state.page = 1;
-            marcarSubtabsActivos();
-            cargarListado();
-        };
-    });
-
-    if (els.subtabsSupervisorAsistencia) {
-        els.subtabsSupervisorAsistencia.forEach((sub) => {
-            sub.onclick = () => {
-                state.supervisorAsistenciaScope = sub.dataset.supervisorAsistenciaScope;
                 state.page = 1;
                 marcarSubtabsActivos();
                 syncUiByTab();
